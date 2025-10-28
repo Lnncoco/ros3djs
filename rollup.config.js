@@ -1,3 +1,4 @@
+import multi from '@rollup/plugin-multi-entry';
 const rollup = require('rollup');
 
 // plugin that transpiles output into commonjs format
@@ -12,7 +13,54 @@ const { nodeResolve } = require('@rollup/plugin-node-resolve');
 const { terser } = require('rollup-plugin-terser');
 
 const pkg = require('./package.json');
-const input = 'src-esm/index.js';
+
+const orderedSrc = [
+  'src/Ros3D.js',
+  'src/navigation/OcTreeBaseNode.js',
+  'src/navigation/OcTreeBase.js',
+  'src/navigation/OcTree.js',
+  'src/navigation/ColorOcTree.js',
+  'src/depthcloud/DepthCloud.js',
+  'src/interactivemarkers/InteractiveMarkerHandle.js',
+  'src/interactivemarkers/InteractiveMarkerMenu.js',
+  'src/interactivemarkers/InteractiveMarker.js',
+  'src/interactivemarkers/InteractiveMarkerControl.js',
+  'src/interactivemarkers/InteractiveMarkerClient.js',
+  'src/markers/Marker.js',
+  'src/markers/MarkerArrayClient.js',
+  'src/markers/MarkerClient.js',
+  'src/models/Arrow.js',
+  'src/models/Arrow2.js',
+  'src/models/Axes.js',
+  'src/models/Grid.js',
+  'src/models/MeshLoader.js',
+  'src/models/MeshResource.js',
+  'src/models/TriangleList.js',
+  'src/navigation/OccupancyGrid.js',
+  'src/navigation/OccupancyGridClient.js',
+  'src/navigation/OcTreeClient.js',
+  'src/navigation/Odometry.js',
+  'src/navigation/Path.js',
+  'src/navigation/Point.js',
+  'src/navigation/Polygon.js',
+  'src/navigation/Pose.js',
+  'src/navigation/PoseArray.js',
+  'src/navigation/PoseWithCovariance.js',
+  'src/sensors/LaserScan.js',
+  'src/sensors/NavSatFix.js',
+  'src/sensors/PointCloud2.js',
+  'src/sensors/Points.js',
+  'src/sensors/TFAxes.js',
+  'src/urdf/Urdf.js',
+  'src/urdf/UrdfClient.js',
+  'src/visualization/SceneNode.js',
+  'src/visualization/interaction/OrbitControls.js',
+  'src/visualization/Viewer.js',
+  'src/visualization/interaction/Highlighter.js',
+  'src/visualization/interaction/MouseHandler.js',
+];
+
+const input = orderedSrc;
 
 const browserGlobals = {
   roslib: 'ROSLIB',
@@ -30,48 +78,6 @@ const outputFiles = {
 };
 
 export default [
-  // build main as ES5 in CommonJS format for compatibility
-  {
-    input,
-    output: {
-      name: 'ROS3D',
-      file: outputFiles.commonModule,
-      format: 'cjs',
-      globals: {
-        ...moduleGlobals,
-      }
-    },
-    external: [
-      ...Object.keys(moduleGlobals)
-    ],
-    plugins: [
-      nodeResolve({ browser: true }),
-      commonjs(),
-      buble(),
-      filesize(),
-    ],
-  },
-  // build module as ES5 in ES module format for modern tooling
-  {
-    input,
-    output: {
-      name: 'ROS3D',
-      file: outputFiles.esModule,
-      format: 'es',
-      globals: {
-        ...moduleGlobals,
-      }
-    },
-    external: [
-      ...Object.keys(moduleGlobals)
-    ],
-    plugins: [
-      nodeResolve({ browser: true }),
-      commonjs(),
-      buble(),
-      filesize(),
-    ],
-  },
   // build browser as IIFE module for script tag inclusion, unminified
   // Usage:
   // <script src="../build/ros3d.js"></script>
@@ -89,32 +95,10 @@ export default [
       ...Object.keys(browserGlobals),
     ],
     plugins: [
+      multi(),
       nodeResolve({ browser: true }),
       commonjs(),
       filesize(),
-    ],
-  },
-  // build browser as IIFE module for script tag inclusion, minified
-  // Usage:
-  // <script src="../build/ros3d.min.js"></script>
-  {
-    input,
-    output: {
-      name: 'ROS3D',
-      file: outputFiles.browserGlobalMinified,
-      format: 'iife',
-      globals: {
-        ...browserGlobals,
-      },
-    },
-    external: [
-      ...Object.keys(browserGlobals),
-    ],
-    plugins: [
-      nodeResolve({ browser: true }),
-      commonjs(),
-      filesize(),
-      terser(),
     ],
   },
 ];
