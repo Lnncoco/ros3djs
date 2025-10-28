@@ -9,16 +9,19 @@
   "dependencies": {
     "eventemitter3": "^5.0.1",
     "roslib": "^1.0.0",
-    "three": "^0.89.0"
+    "three": "^0.118.3"
   },
   "devDependencies": {
     "@rollup/plugin-buble": "^1.0.0",
     "@rollup/plugin-commonjs": "^28.0.0",
+    "@rollup/plugin-legacy": "^3.0.2",
+    "@rollup/plugin-multi-entry": "^7.1.0",
     "@rollup/plugin-node-resolve": "^16.0.0",
     "chai": "^4.3.0",
     "debug": "^4.3.0",
     "grunt": "^1.0.0",
     "grunt-contrib-clean": "^2.0.0",
+    "grunt-contrib-concat": "^2.1.0",
     "grunt-contrib-watch": "^1.0.0",
     "grunt-execute": "git+https://github.com/gruntjs-updater/grunt-execute.git#peerDep",
     "grunt-jsdoc": "^2.1.0",

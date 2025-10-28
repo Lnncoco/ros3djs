@@ -59,17 +59,22 @@ ROS3D.Polygon.prototype.processMessage = function(message){
       this.rootObject.remove(this.sn);
   }
 
-  var lineGeometry = new THREE.Geometry();
-  var v3;
+  var lineGeometry = new THREE.BufferGeometry();
+  // Polygon needs to close the loop, so message.polygon.points.length + 1
+  var positions = new Float32Array((message.polygon.points.length + 1) * 3);
   for(var i=0; i<message.polygon.points.length;i++){
-      v3 = new THREE.Vector3( message.polygon.points[i].x, message.polygon.points[i].y,
-                              message.polygon.points[i].z);
-      lineGeometry.vertices.push(v3);
+      positions[i * 3] = message.polygon.points[i].x;
+      positions[i * 3 + 1] = message.polygon.points[i].y;
+      positions[i * 3 + 2] = message.polygon.points[i].z;
   }
-  v3 = new THREE.Vector3( message.polygon.points[0].x, message.polygon.points[0].y,
-                          message.polygon.points[0].z);
-  lineGeometry.vertices.push(v3);
-  lineGeometry.computeLineDistances();
+  // Close the loop
+  positions[message.polygon.points.length * 3] = message.polygon.points[0].x;
+  positions[message.polygon.points.length * 3 + 1] = message.polygon.points[0].y;
+  positions[message.polygon.points.length * 3 + 2] = message.polygon.points[0].z;
+
+  lineGeometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+
+  // lineGeometry.computeLineDistances(); // Not needed/deprecated for BufferGeometry with Line
   var lineMaterial = new THREE.LineBasicMaterial( { color: this.color } );
   var line = new THREE.Line( lineGeometry, lineMaterial );
 

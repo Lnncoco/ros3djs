@@ -1,12 +1,3 @@
-const {
-  debugRules,
-  dependencies,
-  inheritance,
-  injectImports,
-  transpileToEs6
-} = require('./es6-transpiler');
-
-// Export Grunt config
 module.exports = function(grunt) {
 
   grunt.initConfig({
@@ -31,10 +22,57 @@ module.exports = function(grunt) {
         src: '<%= eslint.lint.src  %>',
       }
     },
-    shell: {
-      build: {
-        command: 'rollup -c'
-      }
+    concat: {
+      dist: {
+        src: [
+          'src/Ros3D.js',
+          'src/navigation/OcTreeBaseNode.js',
+          'src/navigation/OcTreeBase.js',
+          'src/navigation/OcTree.js',
+          'src/navigation/ColorOcTree.js',
+          'src/depthcloud/DepthCloud.js',
+          'src/interactivemarkers/InteractiveMarkerHandle.js',
+          'src/interactivemarkers/InteractiveMarkerMenu.js',
+          'src/interactivemarkers/InteractiveMarker.js',
+          'src/interactivemarkers/InteractiveMarkerControl.js',
+          'src/interactivemarkers/InteractiveMarkerClient.js',
+          'src/markers/InstancedMarkerManager.js',
+          'src/markers/Marker.js',
+          'src/markers/MarkerArrayClient.js',
+          'src/markers/MarkerClient.js',
+          'src/models/Arrow.js',
+          'src/models/Arrow2.js',
+          'src/models/Axes.js',
+          'src/models/Grid.js',
+          'src/models/MeshLoader.js',
+          'src/models/MeshResource.js',
+          'src/models/TriangleList.js',
+          'src/navigation/OccupancyGrid.js',
+          'src/navigation/OccupancyGridClient.js',
+          'src/navigation/OcTreeClient.js',
+          'src/navigation/Odometry.js',
+          'src/navigation/Path.js',
+          'src/navigation/Point.js',
+          'src/navigation/Polygon.js',
+          'src/navigation/Pose.js',
+          'src/navigation/PoseArray.js',
+          'src/navigation/PoseWithCovariance.js',
+          'src/sensors/LaserScan.js',
+          'src/sensors/NavSatFix.js',
+          'src/sensors/PointCloud2.js',
+          'src/sensors/Points.js',
+          'src/sensors/TFAxes.js',
+          'src/urdf/Urdf.js',
+          'src/urdf/UrdfClient.js',
+          'src/visualization/SceneNode.js',
+          'src/visualization/interaction/OrbitControls.js',
+          'src/util/MessageThrottleManager.js',
+          'src/visualization/Viewer.js',
+          'src/visualization/interaction/Highlighter.js',
+          'src/visualization/interaction/MouseHandler.js',
+        ],
+        dest: 'build/ros3d.js',
+      },
     },
     karma: {
       build: {
@@ -75,80 +113,16 @@ module.exports = function(grunt) {
         }
       }
     },
-    pipe: {
-      transpile: {
-        options: {
-          process: transpileToEs6,
-        },
-        files: [{
-          expand: true,
-          cwd: 'src',
-          src: [
-            '*.js',
-            '**/*.js',
-          ],
-          dest: 'src-esm/',
-        }]
-      },
-      transpile_imports: {
-        options: {
-          process: injectImports,
-        },
-        files: [{
-          expand: true,
-          cwd: 'src-esm',
-          src: [
-            '*.js',
-            '**/*.js',
-          ],
-          dest: 'src-esm/',
-        }]
-      },
-      transpile_index: {
-        files: [{
-          expand: true,
-          cwd: 'es6-support',
-          src: [
-            'index.js'
-          ],
-          dest: 'src-esm/'
-        }]
-      }
-    },
-    execute: {
-      transpile: {
-        call: (grunt, options) => {
-          console.log();
-          if (debugRules.logInternalDepsAtEnd) {
-            console.log('Internal dependencies');
-            console.log(dependencies.internalToString());
-          }
-          if (debugRules.logExternalDepsAtEnd) {
-            console.log('External dependencies');
-            console.log(dependencies.externalToString());
-          }
-          if (debugRules.logInheritanceAtEnd) {
-            console.log('Inheritance hierarchy');
-            console.log(inheritance.toString());
-          }
-
-          console.log();
-        },
-      }
-    }
   });
 
+  grunt.loadNpmTasks('grunt-contrib-concat');
   grunt.loadNpmTasks('grunt-contrib-watch');
   grunt.loadNpmTasks('grunt-contrib-clean');
   grunt.loadNpmTasks('grunt-jsdoc');
   grunt.loadNpmTasks('grunt-karma');
-  grunt.loadNpmTasks('grunt-pipe');
-  grunt.loadNpmTasks('grunt-execute');
-  grunt.loadNpmTasks('grunt-shell');
   grunt.loadNpmTasks('gruntify-eslint');
 
-  grunt.registerTask('transpile', ['pipe', 'execute']);
-  grunt.registerTask('build', ['eslint:lint', 'pipe', 'shell']);
+  grunt.registerTask('build', ['eslint:lint', 'concat']);
   grunt.registerTask('build_and_watch', ['build', 'watch']);
   grunt.registerTask('doc', ['clean', 'jsdoc']);
   grunt.registerTask('lint', ['eslint:lint',]);

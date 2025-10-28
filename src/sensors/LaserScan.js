@@ -53,9 +53,21 @@ ROS3D.LaserScan.prototype.subscribe = function(){
 };
 
 ROS3D.LaserScan.prototype.processMessage = function(message){
+  // Implement message throttling to prevent excessive updates
+  const topic = this.topicName;
+  
+  // Check if we have throttle config for this topic
+  if (ROS3D.messageThrottleManager.throttleConfigs.has(topic)) {
+    // Use throttle manager to determine if we should process
+    if (!ROS3D.messageThrottleManager.shouldProcess(topic, message)) {
+      return; // Skip processing this message
+    }
+  }
+  
   if(!this.points.setup(message.header.frame_id)) {
       return;
   }
+  
   var n = message.ranges.length;
   var j = 0;
   for(var i=0;i<n;i+=this.points.pointRatio){
@@ -68,4 +80,10 @@ ROS3D.LaserScan.prototype.processMessage = function(message){
     }
   }
   this.points.update(j/3);
+  
+  // Update last processed time for throttling
+  if (ROS3D.messageThrottleManager.throttleConfigs.has(topic)) {
+    const lastMessage = ROS3D.messageThrottleManager.lastMessages.get(topic);
+    lastMessage.timestamp = performance.now();
+  }
 };

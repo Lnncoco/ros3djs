@@ -70,9 +70,6 @@ ROS3D.makeColorMaterial = function(r, g, b, a) {
       opacity : a + 0.1,
       transparent : true,
       depthWrite : true,
-      blendSrc : THREE.SrcAlphaFactor,
-      blendDst : THREE.OneMinusSrcAlphaFactor,
-      blendEquation : THREE.ReverseSubtractEquation,
       blending : THREE.NormalBlending
     });
   } else {

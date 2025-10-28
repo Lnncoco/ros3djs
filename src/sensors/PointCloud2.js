@@ -97,6 +97,17 @@ ROS3D.PointCloud2.prototype.subscribe = function(){
 };
 
 ROS3D.PointCloud2.prototype.processMessage = function(msg){
+  // Implement message throttling to prevent excessive updates
+  const topic = this.topicName;
+  
+  // Check if we have throttle config for this topic
+  if (ROS3D.messageThrottleManager.throttleConfigs.has(topic)) {
+    // Use throttle manager to determine if we should process
+    if (!ROS3D.messageThrottleManager.shouldProcess(topic, msg)) {
+      return; // Skip processing this message
+    }
+  }
+  
   if(!this.points.setup(msg.header.frame_id, msg.point_step, msg.fields)) {
       return;
   }
@@ -135,4 +146,10 @@ ROS3D.PointCloud2.prototype.processMessage = function(msg){
     }
   }
   this.points.update(n);
+  
+  // Update last processed time for throttling
+  if (ROS3D.messageThrottleManager.throttleConfigs.has(topic)) {
+    const lastMessage = ROS3D.messageThrottleManager.lastMessages.get(topic);
+    lastMessage.timestamp = performance.now();
+  }
 };
