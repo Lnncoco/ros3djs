@@ -98,29 +98,32 @@ ROS3D.Marker = function(options) {
       this.add(cylinderMesh);
       break;
     case ROS3D.MARKER_LINE_STRIP:
-      var lineStripGeom = new THREE.Geometry();
+      var lineStripGeom = new THREE.BufferGeometry();
       var lineStripMaterial = new THREE.LineBasicMaterial({
         linewidth : message.scale.x
       });
 
-      // add the points
-      var j;
-      for ( j = 0; j < message.points.length; j++) {
-        var pt = new THREE.Vector3();
-        pt.x = message.points[j].x;
-        pt.y = message.points[j].y;
-        pt.z = message.points[j].z;
-        lineStripGeom.vertices.push(pt);
+      // Create positions array
+      var positions = new Float32Array(message.points.length * 3);
+      for (var j = 0; j < message.points.length; j++) {
+        positions[j * 3] = message.points[j].x;
+        positions[j * 3 + 1] = message.points[j].y;
+        positions[j * 3 + 2] = message.points[j].z;
       }
+
+      // Set positions attribute
+      lineStripGeom.setAttribute('position', new THREE.BufferAttribute(positions, 3));
 
       // determine the colors for each
       if (message.colors.length === message.points.length) {
         lineStripMaterial.vertexColors = true;
-        for ( j = 0; j < message.points.length; j++) {
-          var clr = new THREE.Color();
-          clr.setRGB(message.colors[j].r, message.colors[j].g, message.colors[j].b);
-          lineStripGeom.colors.push(clr);
+        var colors = new Float32Array(message.colors.length * 3);
+        for (var j = 0; j < message.colors.length; j++) {
+          colors[j * 3] = message.colors[j].r;
+          colors[j * 3 + 1] = message.colors[j].g;
+          colors[j * 3 + 2] = message.colors[j].b;
         }
+        lineStripGeom.setAttribute('color', new THREE.BufferAttribute(colors, 3));
       } else {
         lineStripMaterial.color.setRGB(message.color.r, message.color.g, message.color.b);
       }
@@ -129,29 +132,32 @@ ROS3D.Marker = function(options) {
       this.add(new THREE.Line(lineStripGeom, lineStripMaterial));
       break;
     case ROS3D.MARKER_LINE_LIST:
-      var lineListGeom = new THREE.Geometry();
+      var lineListGeom = new THREE.BufferGeometry();
       var lineListMaterial = new THREE.LineBasicMaterial({
         linewidth : message.scale.x
       });
 
-      // add the points
-      var k;
-      for ( k = 0; k < message.points.length; k++) {
-        var v = new THREE.Vector3();
-        v.x = message.points[k].x;
-        v.y = message.points[k].y;
-        v.z = message.points[k].z;
-        lineListGeom.vertices.push(v);
+      // Create positions array
+      var positions = new Float32Array(message.points.length * 3);
+      for (var k = 0; k < message.points.length; k++) {
+        positions[k * 3] = message.points[k].x;
+        positions[k * 3 + 1] = message.points[k].y;
+        positions[k * 3 + 2] = message.points[k].z;
       }
+
+      // Set positions attribute
+      lineListGeom.setAttribute('position', new THREE.BufferAttribute(positions, 3));
 
       // determine the colors for each
       if (message.colors.length === message.points.length) {
         lineListMaterial.vertexColors = true;
-        for ( k = 0; k < message.points.length; k++) {
-          var c = new THREE.Color();
-          c.setRGB(message.colors[k].r, message.colors[k].g, message.colors[k].b);
-          lineListGeom.colors.push(c);
+        var colors = new Float32Array(message.colors.length * 3);
+        for (var k = 0; k < message.colors.length; k++) {
+          colors[k * 3] = message.colors[k].r;
+          colors[k * 3 + 1] = message.colors[k].g;
+          colors[k * 3 + 2] = message.colors[k].b;
         }
+        lineListGeom.setAttribute('color', new THREE.BufferAttribute(colors, 3));
       } else {
         lineListMaterial.color.setRGB(message.color.r, message.color.g, message.color.b);
       }
@@ -160,94 +166,80 @@ ROS3D.Marker = function(options) {
       this.add(new THREE.LineSegments(lineListGeom, lineListMaterial));
       break;
     case ROS3D.MARKER_CUBE_LIST:
-      // holds the main object
-      var object = new THREE.Object3D();
-
-      // check if custom colors should be used
+      // Use instanced rendering for better performance with large lists
       var numPoints = message.points.length;
-      var createColors = (numPoints === message.colors.length);
-      // do not render giant lists
-      var stepSize = Math.ceil(numPoints / 1250);
-
-      // add the points
-      var p, cube, curColor, newMesh;
-      for (p = 0; p < numPoints; p+=stepSize) {
-        cube = new THREE.BoxGeometry(message.scale.x, message.scale.y, message.scale.z);
-
-        // check the color
-        if(createColors) {
-          curColor = ROS3D.makeColorMaterial(message.colors[p].r, message.colors[p].g, message.colors[p].b, message.colors[p].a);
-        } else {
-          curColor = colorMaterial;
-        }
-
-        newMesh = new THREE.Mesh(cube, curColor);
-        newMesh.position.x = message.points[p].x;
-        newMesh.position.y = message.points[p].y;
-        newMesh.position.z = message.points[p].z;
-        object.add(newMesh);
+      var geometry = new THREE.BoxGeometry(message.scale.x, message.scale.y, message.scale.z);
+      
+      // For color handling in instanced rendering we need to use a different approach
+      // Create a single InstancedMesh with multiple instances
+      var instancedMesh = new THREE.InstancedMesh(geometry, colorMaterial, numPoints);
+      
+      var matrix = new THREE.Matrix4();
+      var position = new THREE.Vector3();
+      var scale = new THREE.Vector3(1, 1, 1); // scale is handled by geometry
+      var quaternion = new THREE.Quaternion();
+      
+      // Set position for each instance
+      for (var i = 0; i < numPoints; i++) {
+        position.set(message.points[i].x, message.points[i].y, message.points[i].z);
+        matrix.compose(position, quaternion, scale);
+        instancedMesh.setMatrixAt(i, matrix);
       }
-
-      this.add(object);
+      
+      instancedMesh.instanceMatrix.needsUpdate = true;
+      this.add(instancedMesh);
       break;
     case ROS3D.MARKER_SPHERE_LIST:
-      // holds the main object
-      var sphereObject = new THREE.Object3D();
-
-      // check if custom colors should be used
-      var numSpherePoints = message.points.length;
-      var createSphereColors = (numSpherePoints === message.colors.length);
-      // do not render giant lists
-      var sphereStepSize = Math.ceil(numSpherePoints / 1250);
-
-      // add the points
-      var q, sphere, curSphereColor, newSphereMesh;
-      for (q = 0; q < numSpherePoints; q+=sphereStepSize) {
-        sphere = new THREE.SphereGeometry(0.5, 8, 8);
-
-        // check the color
-        if(createSphereColors) {
-          curSphereColor = ROS3D.makeColorMaterial(message.colors[q].r, message.colors[q].g, message.colors[q].b, message.colors[q].a);
-        } else {
-          curSphereColor = colorMaterial;
-        }
-
-        newSphereMesh = new THREE.Mesh(sphere, curSphereColor);
-        newSphereMesh.scale.x = message.scale.x;
-        newSphereMesh.scale.y = message.scale.y;
-        newSphereMesh.scale.z = message.scale.z;
-        newSphereMesh.position.x = message.points[q].x;
-        newSphereMesh.position.y = message.points[q].y;
-        newSphereMesh.position.z = message.points[q].z;
-        sphereObject.add(newSphereMesh);
+      // Use instanced rendering for better performance with large lists
+      var numPoints = message.points.length;
+      var geometry = new THREE.SphereGeometry(0.5, 8, 8);
+      
+      // Create a single InstancedMesh with multiple instances
+      var instancedMesh = new THREE.InstancedMesh(geometry, colorMaterial, numPoints);
+      
+      var matrix = new THREE.Matrix4();
+      var position = new THREE.Vector3();
+      var scale = new THREE.Vector3(message.scale.x, message.scale.y, message.scale.z);
+      var quaternion = new THREE.Quaternion();
+      
+      // Set position and scale for each instance
+      for (var i = 0; i < numPoints; i++) {
+        position.set(message.points[i].x, message.points[i].y, message.points[i].z);
+        matrix.compose(position, quaternion, scale);
+        instancedMesh.setMatrixAt(i, matrix);
       }
-      this.add(sphereObject);
+      
+      instancedMesh.instanceMatrix.needsUpdate = true;
+      this.add(instancedMesh);
       break;
     case ROS3D.MARKER_POINTS:
       // for now, use a particle system for the lists
-      var geometry = new THREE.Geometry();
+      var geometry = new THREE.BufferGeometry();
       var material = new THREE.PointsMaterial({
         size : message.scale.x
       });
 
-      // add the points
-      var i;
-      for ( i = 0; i < message.points.length; i++) {
-        var vertex = new THREE.Vector3();
-        vertex.x = message.points[i].x;
-        vertex.y = message.points[i].y;
-        vertex.z = message.points[i].z;
-        geometry.vertices.push(vertex);
+      // Create positions array
+      var positions = new Float32Array(message.points.length * 3);
+      for (var i = 0; i < message.points.length; i++) {
+        positions[i * 3] = message.points[i].x;
+        positions[i * 3 + 1] = message.points[i].y;
+        positions[i * 3 + 2] = message.points[i].z;
       }
+
+      // Set positions attribute
+      geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
 
       // determine the colors for each
       if (message.colors.length === message.points.length) {
         material.vertexColors = true;
-        for ( i = 0; i < message.points.length; i++) {
-          var color = new THREE.Color();
-          color.setRGB(message.colors[i].r, message.colors[i].g, message.colors[i].b);
-          geometry.colors.push(color);
+        var colors = new Float32Array(message.colors.length * 3);
+        for (var i = 0; i < message.colors.length; i++) {
+          colors[i * 3] = message.colors[i].r;
+          colors[i * 3 + 1] = message.colors[i].g;
+          colors[i * 3 + 2] = message.colors[i].b;
         }
+        geometry.setAttribute('color', new THREE.BufferAttribute(colors, 3));
       } else {
         material.color.setRGB(message.color.r, message.color.g, message.color.b);
       }

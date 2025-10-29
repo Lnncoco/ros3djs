@@ -70,9 +70,6 @@ ROS3D.makeColorMaterial = function(r, g, b, a) {
       opacity : a + 0.1,
       transparent : true,
       depthWrite : true,
-      blendSrc : THREE.SrcAlphaFactor,
-      blendDst : THREE.OneMinusSrcAlphaFactor,
-      blendEquation : THREE.ReverseSubtractEquation,
       blending : THREE.NormalBlending
     });
   } else {
@@ -623,7 +620,7 @@ ROS3D.OcTreeBase.prototype.buildGeometry = function () {
   const material = new THREE.MeshBasicMaterial({
     color: 'white',
     flatShading: true,
-    vertexColors: THREE.VertexColors,
+    vertexColors: true,
     transparent: this.opacity < 1.0,
     opacity: this.opacity
   });
@@ -1117,7 +1114,7 @@ ROS3D.DepthCloud.prototype.initStreamer = function() {
 
   if (this.metaLoaded) {
     this.texture = new THREE.Texture(this.video);
-    this.geometry = new THREE.Geometry();
+    this.geometry = new THREE.BufferGeometry();
 
     for (var i = 0, l = this.width * this.height; i < l; i++) {
 
@@ -1175,7 +1172,7 @@ ROS3D.DepthCloud.prototype.initStreamer = function() {
       fragmentShader : this.fragment_shader
     });
 
-    this.mesh = new THREE.ParticleSystem(this.geometry, this.material);
+    this.mesh = new THREE.Points(this.geometry, this.material);
     this.mesh.position.x = 0;
     this.mesh.position.y = 0;
     this.add(this.mesh);
@@ -2423,6 +2420,96 @@ ROS3D.InteractiveMarkerClient.prototype.eraseIntMarker = function(intMarkerName)
 
 /**
  * @fileOverview
+ * @author ROS3D development team
+ * @description Manager for instanced rendering of marker lists to improve performance
+ */
+
+/**
+ * A manager for instanced rendering of marker lists.
+ *
+ * @constructor
+ * @param options - object with following keys:
+ */
+ROS3D.InstancedMarkerManager = function() {
+  this.instancedMeshes = new Map(); // 按类型缓存实例化网格
+  this.freeIndices = new Map(); // 跟踪可用索引
+};
+
+/**
+ * Get or create an instanced mesh for the given type.
+ */
+ROS3D.InstancedMarkerManager.prototype.getOrCreateInstancedMesh = function(type, maxCount, material, geometry) {
+  const key = `${type}_${maxCount}`;
+  
+  if (!this.instancedMeshes.has(key)) {
+    const instancedMesh = new THREE.InstancedMesh(geometry, material, maxCount);
+    this.instancedMeshes.set(key, instancedMesh);
+    
+    // Initialize with all indices as free
+    const freeSet = new Set();
+    for (let i = 0; i < maxCount; i++) {
+      freeSet.add(i);
+    }
+    this.freeIndices.set(key, freeSet);
+  }
+  
+  return this.instancedMeshes.get(key);
+};
+
+/**
+ * Update an instance at the given index with new transform.
+ */
+ROS3D.InstancedMarkerManager.prototype.updateInstance = function(instancedMesh, index, position, scale, quaternion) {
+  const matrix = new THREE.Matrix4();
+  matrix.compose(position, quaternion, scale);
+  instancedMesh.setMatrixAt(index, matrix);
+  instancedMesh.instanceMatrix.needsUpdate = true;
+};
+
+/**
+ * Free an instance index for reuse.
+ */
+ROS3D.InstancedMarkerManager.prototype.freeInstance = function(type, maxCount, index) {
+  const key = `${type}_${maxCount}`;
+  if (this.freeIndices.has(key)) {
+    this.freeIndices.get(key).add(index);
+  }
+};
+
+/**
+ * Get a free instance index.
+ */
+ROS3D.InstancedMarkerManager.prototype.getFreeIndex = function(type, maxCount) {
+  const key = `${type}_${maxCount}`;
+  if (this.freeIndices.has(key)) {
+    const freeSet = this.freeIndices.get(key);
+    if (freeSet.size > 0) {
+      // Get and remove the first available index
+      const index = freeSet.values().next().value;
+      freeSet.delete(index);
+      return index;
+    }
+  }
+  return -1; // No free index available
+};
+
+/**
+ * Remove and dispose an instanced mesh.
+ */
+ROS3D.InstancedMarkerManager.prototype.removeInstancedMesh = function(type, maxCount) {
+  const key = `${type}_${maxCount}`;
+  if (this.instancedMeshes.has(key)) {
+    const instancedMesh = this.instancedMeshes.get(key);
+    instancedMesh.dispose();
+    this.instancedMeshes.delete(key);
+    this.freeIndices.delete(key);
+  }
+};
+
+// Global instance
+ROS3D.instancedMarkerManager = new ROS3D.InstancedMarkerManager();
+/**
+ * @fileOverview
  * @author David Gossow - dgossow@willowgarage.com
  * @author Russell Toris - rctoris@wpi.edu
  */
@@ -2521,29 +2608,32 @@ ROS3D.Marker = function(options) {
       this.add(cylinderMesh);
       break;
     case ROS3D.MARKER_LINE_STRIP:
-      var lineStripGeom = new THREE.Geometry();
+      var lineStripGeom = new THREE.BufferGeometry();
       var lineStripMaterial = new THREE.LineBasicMaterial({
         linewidth : message.scale.x
       });
 
-      // add the points
-      var j;
-      for ( j = 0; j < message.points.length; j++) {
-        var pt = new THREE.Vector3();
-        pt.x = message.points[j].x;
-        pt.y = message.points[j].y;
-        pt.z = message.points[j].z;
-        lineStripGeom.vertices.push(pt);
+      // Create positions array
+      var positions = new Float32Array(message.points.length * 3);
+      for (var j = 0; j < message.points.length; j++) {
+        positions[j * 3] = message.points[j].x;
+        positions[j * 3 + 1] = message.points[j].y;
+        positions[j * 3 + 2] = message.points[j].z;
       }
+
+      // Set positions attribute
+      lineStripGeom.setAttribute('position', new THREE.BufferAttribute(positions, 3));
 
       // determine the colors for each
       if (message.colors.length === message.points.length) {
         lineStripMaterial.vertexColors = true;
-        for ( j = 0; j < message.points.length; j++) {
-          var clr = new THREE.Color();
-          clr.setRGB(message.colors[j].r, message.colors[j].g, message.colors[j].b);
-          lineStripGeom.colors.push(clr);
+        var colors = new Float32Array(message.colors.length * 3);
+        for (var j = 0; j < message.colors.length; j++) {
+          colors[j * 3] = message.colors[j].r;
+          colors[j * 3 + 1] = message.colors[j].g;
+          colors[j * 3 + 2] = message.colors[j].b;
         }
+        lineStripGeom.setAttribute('color', new THREE.BufferAttribute(colors, 3));
       } else {
         lineStripMaterial.color.setRGB(message.color.r, message.color.g, message.color.b);
       }
@@ -2552,29 +2642,32 @@ ROS3D.Marker = function(options) {
       this.add(new THREE.Line(lineStripGeom, lineStripMaterial));
       break;
     case ROS3D.MARKER_LINE_LIST:
-      var lineListGeom = new THREE.Geometry();
+      var lineListGeom = new THREE.BufferGeometry();
       var lineListMaterial = new THREE.LineBasicMaterial({
         linewidth : message.scale.x
       });
 
-      // add the points
-      var k;
-      for ( k = 0; k < message.points.length; k++) {
-        var v = new THREE.Vector3();
-        v.x = message.points[k].x;
-        v.y = message.points[k].y;
-        v.z = message.points[k].z;
-        lineListGeom.vertices.push(v);
+      // Create positions array
+      var positions = new Float32Array(message.points.length * 3);
+      for (var k = 0; k < message.points.length; k++) {
+        positions[k * 3] = message.points[k].x;
+        positions[k * 3 + 1] = message.points[k].y;
+        positions[k * 3 + 2] = message.points[k].z;
       }
+
+      // Set positions attribute
+      lineListGeom.setAttribute('position', new THREE.BufferAttribute(positions, 3));
 
       // determine the colors for each
       if (message.colors.length === message.points.length) {
         lineListMaterial.vertexColors = true;
-        for ( k = 0; k < message.points.length; k++) {
-          var c = new THREE.Color();
-          c.setRGB(message.colors[k].r, message.colors[k].g, message.colors[k].b);
-          lineListGeom.colors.push(c);
+        var colors = new Float32Array(message.colors.length * 3);
+        for (var k = 0; k < message.colors.length; k++) {
+          colors[k * 3] = message.colors[k].r;
+          colors[k * 3 + 1] = message.colors[k].g;
+          colors[k * 3 + 2] = message.colors[k].b;
         }
+        lineListGeom.setAttribute('color', new THREE.BufferAttribute(colors, 3));
       } else {
         lineListMaterial.color.setRGB(message.color.r, message.color.g, message.color.b);
       }
@@ -2583,94 +2676,80 @@ ROS3D.Marker = function(options) {
       this.add(new THREE.LineSegments(lineListGeom, lineListMaterial));
       break;
     case ROS3D.MARKER_CUBE_LIST:
-      // holds the main object
-      var object = new THREE.Object3D();
-
-      // check if custom colors should be used
+      // Use instanced rendering for better performance with large lists
       var numPoints = message.points.length;
-      var createColors = (numPoints === message.colors.length);
-      // do not render giant lists
-      var stepSize = Math.ceil(numPoints / 1250);
-
-      // add the points
-      var p, cube, curColor, newMesh;
-      for (p = 0; p < numPoints; p+=stepSize) {
-        cube = new THREE.BoxGeometry(message.scale.x, message.scale.y, message.scale.z);
-
-        // check the color
-        if(createColors) {
-          curColor = ROS3D.makeColorMaterial(message.colors[p].r, message.colors[p].g, message.colors[p].b, message.colors[p].a);
-        } else {
-          curColor = colorMaterial;
-        }
-
-        newMesh = new THREE.Mesh(cube, curColor);
-        newMesh.position.x = message.points[p].x;
-        newMesh.position.y = message.points[p].y;
-        newMesh.position.z = message.points[p].z;
-        object.add(newMesh);
+      var geometry = new THREE.BoxGeometry(message.scale.x, message.scale.y, message.scale.z);
+      
+      // For color handling in instanced rendering we need to use a different approach
+      // Create a single InstancedMesh with multiple instances
+      var instancedMesh = new THREE.InstancedMesh(geometry, colorMaterial, numPoints);
+      
+      var matrix = new THREE.Matrix4();
+      var position = new THREE.Vector3();
+      var scale = new THREE.Vector3(1, 1, 1); // scale is handled by geometry
+      var quaternion = new THREE.Quaternion();
+      
+      // Set position for each instance
+      for (var i = 0; i < numPoints; i++) {
+        position.set(message.points[i].x, message.points[i].y, message.points[i].z);
+        matrix.compose(position, quaternion, scale);
+        instancedMesh.setMatrixAt(i, matrix);
       }
-
-      this.add(object);
+      
+      instancedMesh.instanceMatrix.needsUpdate = true;
+      this.add(instancedMesh);
       break;
     case ROS3D.MARKER_SPHERE_LIST:
-      // holds the main object
-      var sphereObject = new THREE.Object3D();
-
-      // check if custom colors should be used
-      var numSpherePoints = message.points.length;
-      var createSphereColors = (numSpherePoints === message.colors.length);
-      // do not render giant lists
-      var sphereStepSize = Math.ceil(numSpherePoints / 1250);
-
-      // add the points
-      var q, sphere, curSphereColor, newSphereMesh;
-      for (q = 0; q < numSpherePoints; q+=sphereStepSize) {
-        sphere = new THREE.SphereGeometry(0.5, 8, 8);
-
-        // check the color
-        if(createSphereColors) {
-          curSphereColor = ROS3D.makeColorMaterial(message.colors[q].r, message.colors[q].g, message.colors[q].b, message.colors[q].a);
-        } else {
-          curSphereColor = colorMaterial;
-        }
-
-        newSphereMesh = new THREE.Mesh(sphere, curSphereColor);
-        newSphereMesh.scale.x = message.scale.x;
-        newSphereMesh.scale.y = message.scale.y;
-        newSphereMesh.scale.z = message.scale.z;
-        newSphereMesh.position.x = message.points[q].x;
-        newSphereMesh.position.y = message.points[q].y;
-        newSphereMesh.position.z = message.points[q].z;
-        sphereObject.add(newSphereMesh);
+      // Use instanced rendering for better performance with large lists
+      var numPoints = message.points.length;
+      var geometry = new THREE.SphereGeometry(0.5, 8, 8);
+      
+      // Create a single InstancedMesh with multiple instances
+      var instancedMesh = new THREE.InstancedMesh(geometry, colorMaterial, numPoints);
+      
+      var matrix = new THREE.Matrix4();
+      var position = new THREE.Vector3();
+      var scale = new THREE.Vector3(message.scale.x, message.scale.y, message.scale.z);
+      var quaternion = new THREE.Quaternion();
+      
+      // Set position and scale for each instance
+      for (var i = 0; i < numPoints; i++) {
+        position.set(message.points[i].x, message.points[i].y, message.points[i].z);
+        matrix.compose(position, quaternion, scale);
+        instancedMesh.setMatrixAt(i, matrix);
       }
-      this.add(sphereObject);
+      
+      instancedMesh.instanceMatrix.needsUpdate = true;
+      this.add(instancedMesh);
       break;
     case ROS3D.MARKER_POINTS:
       // for now, use a particle system for the lists
-      var geometry = new THREE.Geometry();
+      var geometry = new THREE.BufferGeometry();
       var material = new THREE.PointsMaterial({
         size : message.scale.x
       });
 
-      // add the points
-      var i;
-      for ( i = 0; i < message.points.length; i++) {
-        var vertex = new THREE.Vector3();
-        vertex.x = message.points[i].x;
-        vertex.y = message.points[i].y;
-        vertex.z = message.points[i].z;
-        geometry.vertices.push(vertex);
+      // Create positions array
+      var positions = new Float32Array(message.points.length * 3);
+      for (var i = 0; i < message.points.length; i++) {
+        positions[i * 3] = message.points[i].x;
+        positions[i * 3 + 1] = message.points[i].y;
+        positions[i * 3 + 2] = message.points[i].z;
       }
+
+      // Set positions attribute
+      geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
 
       // determine the colors for each
       if (message.colors.length === message.points.length) {
         material.vertexColors = true;
-        for ( i = 0; i < message.points.length; i++) {
-          var color = new THREE.Color();
-          color.setRGB(message.colors[i].r, message.colors[i].g, message.colors[i].b);
-          geometry.colors.push(color);
+        var colors = new Float32Array(message.colors.length * 3);
+        for (var i = 0; i < message.colors.length; i++) {
+          colors[i * 3] = message.colors[i].r;
+          colors[i * 3 + 1] = message.colors[i].g;
+          colors[i * 3 + 2] = message.colors[i].b;
         }
+        geometry.setAttribute('color', new THREE.BufferAttribute(colors, 3));
       } else {
         material.color.setRGB(message.color.r, message.color.g, message.color.b);
       }
@@ -3065,6 +3144,11 @@ ROS3D.MarkerClient = function(options) {
 
   this.processMessageBound = this.processMessage.bind(this);
   this.subscribe();
+  
+  // Start periodic check for expired markers if lifetime is set
+  if (this.lifetime > 0) {
+    this.checkExpiredMarkers();
+  }
 };
 ROS3D.MarkerClient.prototype.__proto__ = EventEmitter3.prototype;
 
@@ -3100,18 +3184,49 @@ ROS3D.MarkerClient.prototype.subscribe = function(){
 };
 
 ROS3D.MarkerClient.prototype.processMessage = function(message){
+  // Implement message throttling for marker updates
+  const topic = this.topicName;
+  
+  // Check if we have throttle config for this topic
+  if (ROS3D.messageThrottleManager.throttleConfigs.has(topic)) {
+    // Use throttle manager to determine if we should process
+    if (!ROS3D.messageThrottleManager.shouldProcess(topic, message)) {
+      return; // Skip processing this message
+    }
+  }
+  
   // remove old marker from Three.Object3D children buffer
   var key = message.ns + message.id;
   var oldNode = this.markers[key];
   this.updatedTime[key] = new Date().getTime();
-  if (oldNode) {
-    this.removeMarker(key);
-
-  } else if (this.lifetime) {
-    this.checkTime(message.ns + message.id);
-  }
-
+  
   if (message.action === 0) {  // "ADD" or "MODIFY"
+    if (oldNode) {
+      // Try to update existing marker instead of recreating (performance optimization)
+      var existingMarker = oldNode.children[0];
+      if (existingMarker && existingMarker.update) {
+        var canUpdate = existingMarker.update(message);
+        if (canUpdate) {
+          // Update successful, just change the pose
+          existingMarker.setPose(message.pose);
+          if (this.lifetime) {
+            this.checkTime(message.ns + message.id);
+          }
+          this.emit('change');
+          return;
+        } else {
+          // Update failed, need to recreate
+          this.removeMarker(key);
+        }
+      } else {
+        // No update method, recreate
+        this.removeMarker(key);
+      }
+    } else if (this.lifetime) {
+      this.checkTime(message.ns + message.id);
+    }
+
+    // Create new marker
     var newMarker = new ROS3D.Marker({
       message : message,
       path : this.path,
@@ -3123,9 +3238,19 @@ ROS3D.MarkerClient.prototype.processMessage = function(message){
       object : newMarker
     });
     this.rootObject.add(this.markers[key]);
+  } else if (message.action === 2) {  // "DELETE"
+    this.removeMarker(key);
+  } else if (message.action === 3) {  // "DELETE ALL"
+    this.removeAllMarkers();
   }
 
   this.emit('change');
+  
+  // Update last processed time for throttling
+  if (ROS3D.messageThrottleManager.throttleConfigs.has(topic)) {
+    const lastMessage = ROS3D.messageThrottleManager.lastMessages.get(topic);
+    lastMessage.timestamp = performance.now();
+  }
 };
 
 ROS3D.MarkerClient.prototype.removeMarker = function(key) {
@@ -3135,10 +3260,62 @@ ROS3D.MarkerClient.prototype.removeMarker = function(key) {
   }
   oldNode.unsubscribeTf();
   this.rootObject.remove(oldNode);
-  oldNode.children.forEach(child => {
-    child.dispose();
+  
+  // Properly dispose of geometry and materials in the scene graph
+  oldNode.traverse(function(object) {
+    if (object.geometry) {
+      object.geometry.dispose();
+    }
+    if (object.material) {
+      if (Array.isArray(object.material)) {
+        object.material.forEach(function(material) {
+          if (material && typeof material.dispose === 'function') {
+            material.dispose();
+          }
+        });
+      } else {
+        if (object.material && typeof object.material.dispose === 'function') {
+          object.material.dispose();
+        }
+      }
+    }
   });
+  
   delete(this.markers[key]);
+  delete(this.updatedTime[key]);
+};
+
+// Add method to remove all markers at once
+ROS3D.MarkerClient.prototype.removeAllMarkers = function() {
+  for (var key in this.markers) {
+    this.removeMarker(key);
+  }
+  this.markers = {};
+  this.updatedTime = {};
+};
+
+// Add method to check and remove expired markers periodically
+ROS3D.MarkerClient.prototype.checkExpiredMarkers = function() {
+  if (this.lifetime <= 0) {
+    return;
+  }
+  
+  var curTime = new Date().getTime();
+  var expiredKeys = [];
+  
+  for (var key in this.updatedTime) {
+    if (curTime - this.updatedTime[key] > this.lifetime) {
+      expiredKeys.push(key);
+    }
+  }
+  
+  for (var i = 0; i < expiredKeys.length; i++) {
+    this.removeMarker(expiredKeys[i]);
+  }
+  
+  // Schedule next check
+  var that = this;
+  setTimeout(function() { that.checkExpiredMarkers(); }, 1000); // Check every second
 };
 
 /**
@@ -3425,6 +3602,7 @@ ROS3D.Axes.prototype.__proto__ = THREE.Object3D.prototype;
  *  * lineWidth (optional) - the width of the lines in the grid
  *  * cellSize (optional) - The length, in meters, of the side of each cell
  */
+
 ROS3D.Grid = function(options) {
   options = options || {};
   var num_cells = options.num_cells || 10;
@@ -3435,26 +3613,36 @@ ROS3D.Grid = function(options) {
   THREE.Object3D.call(this);
 
   var material = new THREE.LineBasicMaterial({
-    color: color,
+    color: new THREE.Color(color),
     linewidth: lineWidth
   });
+
+  var edges = [];
 
   for (var i = 0; i <= num_cells; ++i) {
     var edge = cellSize * num_cells / 2;
     var position = edge - (i * cellSize);
-    var geometryH = new THREE.Geometry();
-    geometryH.vertices.push(
-      new THREE.Vector3( -edge, position, 0 ),
-      new THREE.Vector3( edge, position, 0 )
+
+    // Horizontal lines
+    edges.push(
+      new THREE.Vector3(-edge, position, 0),
+      new THREE.Vector3(edge, position, 0)
     );
-    var geometryV = new THREE.Geometry();
-    geometryV.vertices.push(
-      new THREE.Vector3( position, -edge, 0 ),
-      new THREE.Vector3( position, edge, 0 )
+
+    // Vertical lines
+    edges.push(
+      new THREE.Vector3(position, -edge, 0),
+      new THREE.Vector3(position, edge, 0)
     );
-    this.add(new THREE.Line(geometryH, material));
-    this.add(new THREE.Line(geometryV, material));
   }
+
+
+  var geometry = new THREE.BufferGeometry().setFromPoints(edges);
+
+  // Define lines with the geometry
+  var lineSegments = new THREE.LineSegments(geometry, material);
+
+  this.add(lineSegments);
 };
 
 ROS3D.Grid.prototype.__proto__ = THREE.Object3D.prototype;
@@ -3463,134 +3651,146 @@ ROS3D.Grid.prototype.__proto__ = THREE.Object3D.prototype;
  * @fileOverview
  * @author Jose Rojas - jrojas@redlinesolutions.co
  */
+/**
+ * MeshLoader is a singleton factory class for using various helper classes to
+ * load mesh files of different types.
+ *
+ * It consists of one dictionary property 'loaders'. The dictionary keys consist
+ * of the file extension for each supported loader type. The dictionary values
+ * are functions used to construct the loader objects. The functions have the
+ * following parameters:
+ *
+ *  * meshRes - the MeshResource that will contain the loaded mesh
+ *  * uri - the uri path to the mesh file
+ *  @returns loader object
+ */
 
- /**
-  * MeshLoader is a singleton factory class for using various helper classes to
-  * load mesh files of different types.
-  *
-  * It consists of one dictionary property 'loaders'. The dictionary keys consist
-  * of the file extension for each supported loader type. The dictionary values
-  * are functions used to construct the loader objects. The functions have the
-  * following parameters:
-  *
-  *  * meshRes - the MeshResource that will contain the loaded mesh
-  *  * uri - the uri path to the mesh file
-  *  @returns loader object
-  */
+
 ROS3D.MeshLoader = {
-   onError: function(error) {
-     console.error(error);
-   },
-   loaders: {
-     'dae': function(meshRes, uri, options) {
-       const material = options.material;
-       const loader = new THREE.ColladaLoader(options.loader);
-       loader.log = function(message) {
-         if (meshRes.warnings) {
-           console.warn(message);
-         }
-       };
-       loader.load(
-         uri,
-         function colladaReady(collada) {
-           // check for a scale factor in ColladaLoader2
-           // add a texture to anything that is missing one
-           if(material !== null) {
-             collada.scene.traverse(function(child) {
-               if(child instanceof THREE.Mesh) {
-                 if(child.material === undefined) {
-                   child.material = material;
-                 }
-               }
-             });
-           }
+  onError: function (error) {
+    console.error(error);
+  },
+  loaders: {
+    'dae': function (meshRes, uri, options) {
+      // Check if ColladaLoader exists in THREE (Three.js r120+)
+      if (THREE.ColladaLoader) {
+        const loader = new THREE.ColladaLoader(options.loader);
 
-           meshRes.add(collada.scene);
-         },
-         /*onProgress=*/null,
-         ROS3D.MeshLoader.onError);
-         return loader;
-     },
+        loader.load(uri, function (collada_mesh) {
+          let model = collada_mesh.scene;
+          meshRes.add (model);
+          console.log('Done loading collada');
+        });
 
-     'obj': function(meshRes, uri, options) {
-       const material = options.material;
-       const loader = new THREE.OBJLoader(options.loader);
-       loader.log = function(message) {
-         if (meshRes.warnings) {
-           console.warn(message);
-         }
-       };
+        loader.log = function (message) {
+          if (meshRes.warnings) {
+            console.warn(message);
+          }
+        };
+        return loader;
+      } else {
+        console.error('ColladaLoader not available in this Three.js version');
+        return null;
+      }
+    },
 
-       //Reload the mesh again after materials have been loaded
-       // @todo: this should be improved so that the file doesn't need to be
-       // reloaded however that would involve more changes within the OBJLoader.
-       function onMaterialsLoaded(loader, materials) {
-         loader.
-         setMaterials(materials).
-         load(
-           uri,
-           function OBJMaterialsReady(obj) {
-             // add the container group
-             meshRes.add(obj);
-           },
-           null,
-           ROS3D.MeshLoader.onError);
-       }
+    'obj': function (meshRes, uri, options) {
+      // Check if OBJLoader exists in THREE (Three.js r120+)
+      if (THREE.OBJLoader) {
+        const material = options.material;
+        const loader = new THREE.OBJLoader(options.loader);
+        loader.log = function (message) {
+          if (meshRes.warnings) {
+            console.warn(message);
+          }
+        };
 
-       loader.load(
-         uri,
-         function OBJFileReady(obj) {
+        //Reload the mesh again after materials have been loaded
+        // @todo: this should be improved so that the file doesn't need to be
+        // reloaded however that would involve more changes within the OBJLoader.
+        function onMaterialsLoaded(loader, materials) {
+          loader.
+            setMaterials(materials).
+            load(
+              uri,
+              function OBJMaterialsReady(obj) {
+                // add the container group
+                meshRes.add(obj);
+              },
+              null,
+              ROS3D.MeshLoader.onError);
+        }
 
-           const baseUri = THREE.LoaderUtils.extractUrlBase( uri );
+        loader.load(
+          uri,
+          function OBJFileReady(obj) {
 
-           if (obj.materialLibraries.length) {
-             // load the material libraries
-             const materialUri = obj.materialLibraries[0];
-             new THREE.MTLLoader(options.loader).setPath(baseUri).load(
-               materialUri,
-               function(materials) {
-                  materials.preload();
-                  onMaterialsLoaded(loader, materials);
-               },
-               null,
-               ROS3D.MeshLoader.onError
-             );
-           } else {
-             // add the container group
-             meshRes.add(obj);
-           }
+            const baseUri = THREE.LoaderUtils.extractUrlBase(uri);
 
-         },
-         /*onProgress=*/null,
-         ROS3D.MeshLoader.onError
-         );
-         return loader;
-     },
+            if (obj.materialLibraries.length) {
+              // load the material libraries
+              const materialUri = obj.materialLibraries[0];
+              // Check if MTLLoader exists in THREE (Three.js r120+)
+              if (THREE.MTLLoader) {
+                new THREE.MTLLoader(options.loader).setPath(baseUri).load(
+                  materialUri,
+                  function (materials) {
+                    materials.preload();
+                    onMaterialsLoaded(loader, materials);
+                  },
+                  null,
+                  ROS3D.MeshLoader.onError
+                );
+              } else {
+                console.error('MTLLoader not available in this Three.js version');
+              }
+            } else {
+              // add the container group
+              meshRes.add(obj);
+            }
 
-     'stl': function(meshRes, uri, options) {
-       const material = options.material;
-       const loader = new THREE.STLLoader(options.loader);
-       {
-         loader.load(uri,
-                     function ( geometry ) {
-                       geometry.computeFaceNormals();
-                       var mesh;
-                       if(material !== null) {
-                         mesh = new THREE.Mesh( geometry, material );
-                       } else {
-                         mesh = new THREE.Mesh( geometry,
-                                                new THREE.MeshBasicMaterial( { color: 0x999999 } ) );
-                       }
-                       meshRes.add(mesh);
-                     },
+          },
+           /*onProgress=*/null,
+          ROS3D.MeshLoader.onError
+        );
+        return loader;
+      } else {
+        console.error('OBJLoader not available in this Three.js version');
+        return null;
+      }
+    },
+
+    'stl': function (meshRes, uri, options) {
+      // Check if STLLoader exists in THREE (Three.js r120+)
+      if (THREE.STLLoader) {
+        const material = options.material;
+        const loader = new THREE.STLLoader(options.loader);
+        console.log('Loading stl: ' + uri);
+        console.log(options.material);
+
+        loader.load(uri,
+          function (geometry) {
+            geometry.computeVertexNormals();
+            var mesh;
+            if (material !== null) {
+              mesh = new THREE.Mesh(geometry, material);
+            } else {
+              mesh = new THREE.Mesh(geometry,
+                new THREE.MeshBasicMaterial({ color: 0x999999 }));
+            }
+            meshRes.add(mesh);
+          },
                      /*onProgress=*/null,
-                     ROS3D.MeshLoader.onError);
-       }
-       return loader;
-     }
+          ROS3D.MeshLoader.onError);
+        return loader;
+      } else {
+        console.error('STLLoader not available in this Three.js version');
+        return null;
+      }
+    }
 
-   }
- };
+  }
+};
 
 /**
  * @fileOverview
@@ -3652,7 +3852,7 @@ ROS3D.MeshResource.prototype.__proto__ = THREE.Object3D.prototype;
  *   * vertices - the array of vertices to use
  *   * colors - the associated array of colors to use
  */
-ROS3D.TriangleList = function(options) {
+ROS3D.TriangleList = function (options) {
   options = options || {};
   var material = options.material || new THREE.MeshBasicMaterial();
   var vertices = options.vertices;
@@ -3663,40 +3863,52 @@ ROS3D.TriangleList = function(options) {
   // set the material to be double sided
   material.side = THREE.DoubleSide;
 
-  // construct the geometry
-  var geometry = new THREE.Geometry();
-  for (i = 0; i < vertices.length; i++) {
-    geometry.vertices.push(new THREE.Vector3(vertices[i].x, vertices[i].y, vertices[i].z));
-  }
 
-  // set the colors
-  var i, j;
+  // Construct the geometry
+  let geometry = new THREE.BufferGeometry();
+  let verticesArray = new Float32Array(vertices.length * 3);
+  for (let i = 0; i < vertices.length; i++) {
+    verticesArray[i * 3] = vertices[i].x;
+    verticesArray[i * 3 + 1] = vertices[i].y;
+    verticesArray[i * 3 + 2] = vertices[i].z;
+  }
+  geometry.setAttribute('position', new THREE.BufferAttribute(verticesArray, 3));
+
+  // Set the colors
+  let i, j;
   if (colors.length === vertices.length) {
-    // use per-vertex color
-    for (i = 0; i < vertices.length; i += 3) {
-      var faceVert = new THREE.Face3(i, i + 1, i + 2);
-      for (j = i * 3; j < i * 3 + 3; i++) {
-        var color = new THREE.Color();
-        color.setRGB(colors[i].r, colors[i].g, colors[i].b);
-        faceVert.vertexColors.push(color);
-      }
-      geometry.faces.push(faceVert);
+    // Use per-vertex color
+    let vertexColors = new Float32Array(colors.length * 3);
+    for (i = 0; i < colors.length; i++) {
+      vertexColors[i * 3] = colors[i].r;
+      vertexColors[i * 3 + 1] = colors[i].g;
+      vertexColors[i * 3 + 2] = colors[i].b;
     }
-    material.vertexColors = THREE.VertexColors;
+    geometry.setAttribute('color', new THREE.BufferAttribute(vertexColors, 3));
+    material.vertexColors = true;
   } else if (colors.length === vertices.length / 3) {
-    // use per-triangle color
-    for (i = 0; i < vertices.length; i += 3) {
-      var faceTri = new THREE.Face3(i, i + 1, i + 2);
-      faceTri.color.setRGB(colors[i / 3].r, colors[i / 3].g, colors[i / 3].b);
-      geometry.faces.push(faceTri);
+    // Use per-triangle color
+    let faceColors = new Float32Array(vertices.length);
+    for (i = 0; i < colors.length; i++) {
+      let color = new THREE.Color(colors[i].r, colors[i].g, colors[i].b);
+      for (j = 0; j < 9; j += 3) {
+        faceColors[i * 9 + j] = color.r;
+        faceColors[i * 9 + j + 1] = color.g;
+        faceColors[i * 9 + j + 2] = color.b;
+      }
     }
-    material.vertexColors = THREE.FaceColors;
+    geometry.setAttribute('color', new THREE.BufferAttribute(faceColors, 3));
+    material.vertexColors = true;
   } else {
-    // use marker color
+    // Use marker color
+    let defaultColor = new THREE.Color(1, 1, 1); // Default color
+    let faceColors = new Float32Array(vertices.length);
     for (i = 0; i < vertices.length; i += 3) {
-      var face = new THREE.Face3(i, i + 1, i + 2);
-      geometry.faces.push(face);
+      faceColors[i * 3] = defaultColor.r;
+      faceColors[i * 3 + 1] = defaultColor.g;
+      faceColors[i * 3 + 2] = defaultColor.b;
     }
+    geometry.setAttribute('color', new THREE.BufferAttribute(faceColors, 3));
   }
 
   geometry.computeBoundingBox();
@@ -3712,7 +3924,7 @@ ROS3D.TriangleList.prototype.__proto__ = THREE.Object3D.prototype;
  *
  * @param hex - the hex value of the color to set
  */
-ROS3D.TriangleList.prototype.setColor = function(hex) {
+ROS3D.TriangleList.prototype.setColor = function (hex) {
   this.mesh.material.color.setHex(hex);
 };
 
@@ -3742,7 +3954,8 @@ ROS3D.OccupancyGrid = function(options) {
   var origin = info.origin;
   var width = info.width;
   var height = info.height;
-  var geom = new THREE.PlaneBufferGeometry(width, height);
+  var geom = new THREE.PlaneGeometry(width, height);
+
 
   // create the color material
   var imageData = new Uint8Array(width * height * 4);
@@ -4283,7 +4496,7 @@ ROS3D.Path.prototype.processMessage = function(message){
       this.rootObject.remove(this.sn);
   }
 
-  var lineGeometry = new THREE.Geometry();
+  var lineGeometry = new THREE.BufferGeometry();
   for(var i=0; i<message.poses.length;i++){
       var v3 = new THREE.Vector3( message.poses[i].pose.position.x, message.poses[i].pose.position.y,
                                   message.poses[i].pose.position.z);
@@ -4440,7 +4653,7 @@ ROS3D.Polygon.prototype.processMessage = function(message){
       this.rootObject.remove(this.sn);
   }
 
-  var lineGeometry = new THREE.Geometry();
+  var lineGeometry = new THREE.BufferGeometry();
   var v3;
   for(var i=0; i<message.polygon.points.length;i++){
       v3 = new THREE.Vector3( message.polygon.points[i].x, message.polygon.points[i].y,
@@ -4612,7 +4825,7 @@ ROS3D.PoseArray.prototype.processMessage = function(message){
   var line;
 
   for(var i=0;i<message.poses.length;i++){
-      var lineGeometry = new THREE.Geometry();
+      var lineGeometry = new THREE.BufferGeometry();
 
       var v3 = new THREE.Vector3( message.poses[i].position.x, message.poses[i].position.y,
                                   message.poses[i].position.z);
@@ -4783,9 +4996,21 @@ ROS3D.LaserScan.prototype.subscribe = function(){
 };
 
 ROS3D.LaserScan.prototype.processMessage = function(message){
+  // Implement message throttling to prevent excessive updates
+  const topic = this.topicName;
+  
+  // Check if we have throttle config for this topic
+  if (ROS3D.messageThrottleManager.throttleConfigs.has(topic)) {
+    // Use throttle manager to determine if we should process
+    if (!ROS3D.messageThrottleManager.shouldProcess(topic, message)) {
+      return; // Skip processing this message
+    }
+  }
+  
   if(!this.points.setup(message.header.frame_id)) {
       return;
   }
+  
   var n = message.ranges.length;
   var j = 0;
   for(var i=0;i<n;i+=this.points.pointRatio){
@@ -4798,6 +5023,12 @@ ROS3D.LaserScan.prototype.processMessage = function(message){
     }
   }
   this.points.update(j/3);
+  
+  // Update last processed time for throttling
+  if (ROS3D.messageThrottleManager.throttleConfigs.has(topic)) {
+    const lastMessage = ROS3D.messageThrottleManager.lastMessages.get(topic);
+    lastMessage.timestamp = performance.now();
+  }
 };
 
 /**
@@ -4996,6 +5227,17 @@ ROS3D.PointCloud2.prototype.subscribe = function(){
 };
 
 ROS3D.PointCloud2.prototype.processMessage = function(msg){
+  // Implement message throttling to prevent excessive updates
+  const topic = this.topicName;
+  
+  // Check if we have throttle config for this topic
+  if (ROS3D.messageThrottleManager.throttleConfigs.has(topic)) {
+    // Use throttle manager to determine if we should process
+    if (!ROS3D.messageThrottleManager.shouldProcess(topic, msg)) {
+      return; // Skip processing this message
+    }
+  }
+  
   if(!this.points.setup(msg.header.frame_id, msg.point_step, msg.fields)) {
       return;
   }
@@ -5034,6 +5276,12 @@ ROS3D.PointCloud2.prototype.processMessage = function(msg){
     }
   }
   this.points.update(n);
+  
+  // Update last processed time for throttling
+  if (ROS3D.messageThrottleManager.throttleConfigs.has(topic)) {
+    const lastMessage = ROS3D.messageThrottleManager.lastMessages.get(topic);
+    lastMessage.timestamp = performance.now();
+  }
 };
 
 /**
@@ -5095,36 +5343,40 @@ ROS3D.Points.prototype.setup = function(frame, point_step, fields)
         this.geom = new THREE.BufferGeometry();
 
         this.positions = new THREE.BufferAttribute( new Float32Array( this.max_pts * 3), 3, false );
-        this.geom.addAttribute( 'position', this.positions.setDynamic(true) );
+        this.geom.setAttribute( 'position', this.positions );
+        this.positions.setUsage(THREE.DynamicDrawUsage); // setDynamic(true) is replaced with setUsage
 
         if(!this.colorsrc && this.fields.rgb) {
             this.colorsrc = 'rgb';
         }
-        if(this.colorsrc) {
+        if (this.colorsrc) {
             var field = this.fields[this.colorsrc];
             if (field) {
-                this.colors = new THREE.BufferAttribute( new Float32Array( this.max_pts * 3), 3, false );
-                this.geom.addAttribute( 'color', this.colors.setDynamic(true) );
+                this.colors = new THREE.BufferAttribute(new Float32Array(this.max_pts * 3), 3, false);
+                this.colors.setUsage(THREE.DynamicDrawUsage); // setDynamic(true) is replaced with setUsage
+                this.geom.setAttribute('color', this.colors); // addAttribute is replaced with setAttribute
+
                 var offset = field.offset;
                 this.getColor = [
-                    function(dv,base,le){return dv.getInt8(base+offset,le);},
-                    function(dv,base,le){return dv.getUint8(base+offset,le);},
-                    function(dv,base,le){return dv.getInt16(base+offset,le);},
-                    function(dv,base,le){return dv.getUint16(base+offset,le);},
-                    function(dv,base,le){return dv.getInt32(base+offset,le);},
-                    function(dv,base,le){return dv.getUint32(base+offset,le);},
-                    function(dv,base,le){return dv.getFloat32(base+offset,le);},
-                    function(dv,base,le){return dv.getFloat64(base+offset,le);}
-                ][field.datatype-1];
-                this.colormap = this.colormap || function(x){return new THREE.Color(x);};
+                    function(dv, base, le) { return dv.getInt8(base + offset, le); },
+                    function(dv, base, le) { return dv.getUint8(base + offset, le); },
+                    function(dv, base, le) { return dv.getInt16(base + offset, le); },
+                    function(dv, base, le) { return dv.getUint16(base + offset, le); },
+                    function(dv, base, le) { return dv.getInt32(base + offset, le); },
+                    function(dv, base, le) { return dv.getUint32(base + offset, le); },
+                    function(dv, base, le) { return dv.getFloat32(base + offset, le); },
+                    function(dv, base, le) { return dv.getFloat64(base + offset, le); }
+                ][field.datatype - 1];
+
+                this.colormap = this.colormap || function(x) { return new THREE.Color(x); };
             } else {
                 console.warn('unavailable field "' + this.colorsrc + '" for coloring.');
             }
         }
 
-        if(!this.material.isMaterial) { // if it is an option, apply defaults and pass it to a PointsMaterial
-            if(this.colors && this.material.vertexColors === undefined) {
-                this.material.vertexColors = THREE.VertexColors;
+        if (!this.material.isMaterial) { // if it is an option, apply defaults and pass it to a PointsMaterial
+            if (this.colors && this.material.vertexColors === undefined) {
+                this.material.vertexColors = true; // THREE.VertexColors is replaced with boolean true
             }
             this.material = new THREE.PointsMaterial(this.material);
         }
@@ -5147,11 +5399,11 @@ ROS3D.Points.prototype.update = function(n)
   this.geom.setDrawRange(0,n);
 
   this.positions.needsUpdate = true;
-  this.positions.updateRange.count = n * this.positions.itemSize;
+  this.positions.count = n; // updateRange is deprecated, use count instead
 
   if (this.colors) {
     this.colors.needsUpdate = true;
-    this.colors.updateRange.count = n * this.colors.itemSize;
+    this.colors.count = n; // updateRange is deprecated, use count instead
   }
 };
 
@@ -5233,7 +5485,6 @@ ROS3D.Urdf = function(options) {
   var tfClient = options.tfClient;
   var tfPrefix = options.tfPrefix || '';
   var loader = options.loader;
-
   THREE.Object3D.call(this);
 
   // load all models
@@ -5249,15 +5500,25 @@ ROS3D.Urdf = function(options) {
         var colorMaterial = null;
         if (visual.material && visual.material.color) {
           var color = visual.material && visual.material.color;
-          colorMaterial = ROS3D.makeColorMaterial(color.r, color.g, color.b, color.a);
+          // This replaces the previous simple material setup
+          var colorMaterial = new THREE.MeshStandardMaterial({
+            color: new THREE.Color(color.r, color.g, color.b),
+            roughness: 0.9,  // Higher roughness makes shadows more defined
+            metalness: 0.7,  // Slightly metallic to help with light reflection
+        });
+
+          //colorMaterial = ROS3D.makeColorMaterial(color.r, color.g, color.b, color.a);
         }
         if (visual.geometry.type === ROSLIB.URDF_MESH) {
+
           var uri = visual.geometry.filename;
           // strips package://
           var tmpIndex = uri.indexOf('package://');
+
           if (tmpIndex !== -1) {
             uri = uri.substr(tmpIndex + ('package://').length);
           }
+
           var fileType = uri.substr(-3).toLowerCase();
 
           if (ROS3D.MeshLoader.loaders[fileType]) {
@@ -5268,6 +5529,9 @@ ROS3D.Urdf = function(options) {
               loader : loader,
               material : colorMaterial
             });
+
+            mesh.castShadow = true;        // Enable the mesh to cast shadows
+            mesh.receiveShadow = true;     // Enable the mesh to receive shadows
 
             // check for a scale
             if(link.visuals[i].geometry.scale) {
@@ -5306,7 +5570,12 @@ ROS3D.Urdf = function(options) {
 ROS3D.Urdf.prototype.createShapeMesh = function(visual, options) {
   var colorMaterial = null;
   if (!colorMaterial) {
-    colorMaterial = ROS3D.makeColorMaterial(0, 0, 0, 1);
+    var colorMaterial = new THREE.MeshStandardMaterial({
+      color: new THREE.Color(0, 0, 1),  // Color from URDF
+      metalness: 1.0,    // Full metallic surface
+      roughness: 0.3,    // Shiny surface (low roughness)
+      emissive: new THREE.Color(0, 0, 1), // Optional: emissive for glow
+      });
   }
   var shapeMesh;
   // Create a shape
@@ -5987,6 +6256,124 @@ Object.assign(ROS3D.OrbitControls.prototype, THREE.EventDispatcher.prototype);
 
 /**
  * @fileOverview
+ * @author ROS3D development team
+ * @description Manager for throttling ROS messages to improve performance
+ */
+
+/**
+ * A manager for throttling ROS messages.
+ *
+ * @constructor
+ */
+ROS3D.MessageThrottleManager = function() {
+  this.throttleConfigs = new Map();
+  this.lastMessages = new Map();
+  this.processingTimes = new Map();
+  this.pendingMessages = new Map(); // For 'latest' strategy
+  this.throttleTimeouts = new Map(); // Active timeouts
+};
+
+/**
+ * Set throttle configuration for a topic.
+ * @param topic - the topic name
+ * @param config - configuration object
+ */
+ROS3D.MessageThrottleManager.prototype.setConfig = function(topic, config) {
+  /*
+   * config: {
+   *   maxFrequency: 最大处理频率 (Hz)
+   *   maxProcessingTime: 最大处理时间 (ms)
+   *   queueSize: 队列大小
+   *   strategy: 节流策略 ('latest', 'average', 'skip')
+   * }
+   */
+  this.throttleConfigs.set(topic, config);
+  this.lastMessages.set(topic, { message: null, timestamp: 0 });
+  this.processingTimes.set(topic, []);
+  this.pendingMessages.set(topic, null);
+  this.throttleTimeouts.set(topic, null);
+};
+
+/**
+ * Check if a message should be processed based on throttle configuration.
+ * @param topic - the topic name
+ * @param message - the message to check
+ * @return true if the message should be processed, false otherwise
+ */
+ROS3D.MessageThrottleManager.prototype.shouldProcess = function(topic, message) {
+  const config = this.throttleConfigs.get(topic);
+  if (!config) {
+    return true;
+  }
+  
+  const now = performance.now();
+  const lastMessage = this.lastMessages.get(topic);
+  
+  // 频率限制
+  const minInterval = 1000 / config.maxFrequency;
+  if (now - lastMessage.timestamp < minInterval) {
+    // 应用节流策略
+    switch (config.strategy) {
+      case 'latest':
+        // 保存最新消息，跳过当前处理
+        this.pendingMessages.set(topic, message);
+        if (!this.throttleTimeouts.get(topic)) {
+          const timeoutId = setTimeout(() => {
+            const latestMessage = this.pendingMessages.get(topic);
+            if (latestMessage) {
+              // Process the latest message somehow, but this is more complex
+              // For now, we'll just store it for potential external processing
+              this.pendingMessages.set(topic, null);
+              this.throttleTimeouts.set(topic, null);
+            }
+          }, minInterval - (now - lastMessage.timestamp)); // Wait remaining time
+          this.throttleTimeouts.set(topic, timeoutId);
+        }
+        return false;
+      case 'skip':
+        // 跳过当前消息
+        return false;
+      default:
+        return false;
+    }
+  }
+  
+  return true;
+};
+
+/**
+ * Process a message with the given processing function, respecting throttle settings.
+ * @param topic - the topic name
+ * @param message - the message to process
+ * @param processFn - the processing function
+ * @return result of processing function or null if throttled
+ */
+ROS3D.MessageThrottleManager.prototype.processMessage = function(topic, message, processFn) {
+  if (this.shouldProcess(topic, message)) {
+    const startTime = performance.now();
+    const result = processFn(message);
+    const processingTime = performance.now() - startTime;
+    
+    // 记录处理时间，用于动态调整
+    const times = this.processingTimes.get(topic);
+    times.push(processingTime);
+    if (times.length > 10) {
+      times.shift(); // 保留最近10次记录
+    }
+    
+    const lastMessage = this.lastMessages.get(topic);
+    lastMessage.timestamp = performance.now();
+    
+    return result;
+  }
+  
+  return null;
+};
+
+// Global instance
+ROS3D.messageThrottleManager = new ROS3D.MessageThrottleManager();
+/**
+ * @fileOverview
  * @author David Gossow - dgossow@willowgarage.com
  * @author Russell Toris - rctoris@wpi.edu
  * @author Jihoon Lee - jihoonlee.in@gmail.com
@@ -6013,22 +6400,23 @@ Object.assign(ROS3D.OrbitControls.prototype, THREE.EventDispatcher.prototype);
  *  *                           panning/zooming. Only has effect when
  *  *                           displayPanAndZoomFrame is set to true.
  */
+
 ROS3D.Viewer = function(options) {
   options = options || {};
   var divID = options.divID;
   var elem = options.elem;
   var width = options.width;
   var height = options.height;
-  var background = options.background || '#111111';
+  var background = options.background || '#ffffff';
   var antialias = options.antialias;
-  var intensity = options.intensity || 0.66;
+  var intensity = options.intensity || 2.5;
   var near = options.near || 0.01;
   var far = options.far || 1000;
   var alpha = options.alpha || 1.0;
   var cameraPosition = options.cameraPose || {
     x : 3,
     y : 3,
-    z : 3
+    z : 7
   };
   var cameraZoomSpeed = options.cameraZoomSpeed || 0.5;
   var displayPanAndZoomFrame = (options.displayPanAndZoomFrame === undefined) ? true : !!options.displayPanAndZoomFrame;
@@ -6040,9 +6428,8 @@ ROS3D.Viewer = function(options) {
     alpha: true
   });
   this.renderer.setClearColor(parseInt(background.replace('#', '0x'), 16), alpha);
-  this.renderer.sortObjects = false;
   this.renderer.setSize(width, height);
-  this.renderer.shadowMap.enabled = false;
+  this.renderer.shadowMap.enabled = true;
   this.renderer.autoClear = false;
 
   // create the global scene
@@ -6063,7 +6450,6 @@ ROS3D.Viewer = function(options) {
   this.cameraControls.userZoomSpeed = cameraZoomSpeed;
 
   // lights
-  this.scene.add(new THREE.AmbientLight(0x555555));
   this.directionalLight = new THREE.DirectionalLight(0xffffff, intensity);
   this.scene.add(this.directionalLight);
 
@@ -6104,6 +6490,7 @@ ROS3D.Viewer.prototype.start = function(){
 /**
  * Renders the associated scene to the viewer.
  */
+
 ROS3D.Viewer.prototype.draw = function(){
   if(this.stopped){
     // Do nothing if stopped
@@ -6113,12 +6500,16 @@ ROS3D.Viewer.prototype.draw = function(){
   // update the controls
   this.cameraControls.update();
 
-  // put light to the top-left of the camera
-  // BUG: position is a read-only property of DirectionalLight,
-  // attempting to assign to it either does nothing or throws an error.
-  //this.directionalLight.position = this.camera.localToWorld(new THREE.Vector3(-1, 1, 0));
-  this.directionalLight.position.normalize();
+  // Update the directional light position to follow the camera
+  this.directionalLight.position.copy(this.camera.position);
+  this.directionalLight.position.add(new THREE.Vector3(0, 1, 1));  // Adjust this vector for light offset
 
+  // Set up the directional light to cast shadows
+  this.directionalLight.castShadow = true;
+  this.directionalLight.shadow.mapSize.width = 2024;
+  this.directionalLight.shadow.mapSize.height = 1024;
+  this.directionalLight.shadow.bias = -0.005;  // Prevents shadow acne (shadow artifacts)
+  this.directionalLight.shadow.radius = 5;  // Larger radius creates softer shadows
   // set the scene
   this.renderer.clear(true, true, true);
   this.renderer.render(this.scene, this.camera);
