@@ -238,15 +238,13 @@ ROS3D.DepthCloud.prototype.initStreamer = function() {
   if (this.metaLoaded) {
     this.texture = new THREE.Texture(this.video);
     this.geometry = new THREE.BufferGeometry();
-
+    var positions = new Float32Array(this.width * this.height * 3);
     for (var i = 0, l = this.width * this.height; i < l; i++) {
-
-      var vertex = new THREE.Vector3();
-      vertex.x = (i % this.width);
-      vertex.y = Math.floor(i / this.width);
-
-      this.geometry.vertices.push(vertex);
+      positions[i * 3] = (i % this.width);
+      positions[i * 3 + 1] = Math.floor(i / this.width);
+      positions[i * 3 + 2] = 0; // Z-coordinate, assuming 2D plane for depth cloud initialization
     }
+    this.geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
 
     this.material = new THREE.ShaderMaterial({
       uniforms : {

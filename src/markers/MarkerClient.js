@@ -118,11 +118,21 @@ ROS3D.MarkerClient.prototype.processMessage = function(message){
       this.checkTime(message.ns + message.id);
     }
 
-    // Create new marker
-    var newMarker = new ROS3D.Marker({
-      message : message,
-      path : this.path,
-    });
+    // Create new marker (or get from pool)
+    var newMarker = ROS3D.resourceManager.getObjectFromPool('marker');
+    if (newMarker) {
+        // Re-initialize the pooled marker
+        newMarker.init({
+            message : message,
+            path : this.path,
+        });
+    } else {
+        // If pool is empty or type not defined, create a new one
+        newMarker = new ROS3D.Marker({
+            message : message,
+            path : this.path,
+        });
+    }
 
     this.markers[key] = new ROS3D.SceneNode({
       frameID : message.header.frame_id,
@@ -153,25 +163,8 @@ ROS3D.MarkerClient.prototype.removeMarker = function(key) {
   oldNode.unsubscribeTf();
   this.rootObject.remove(oldNode);
   
-  // Properly dispose of geometry and materials in the scene graph
-  oldNode.traverse(function(object) {
-    if (object.geometry) {
-      object.geometry.dispose();
-    }
-    if (object.material) {
-      if (Array.isArray(object.material)) {
-        object.material.forEach(function(material) {
-          if (material && typeof material.dispose === 'function') {
-            material.dispose();
-          }
-        });
-      } else {
-        if (object.material && typeof object.material.dispose === 'function') {
-          object.material.dispose();
-        }
-      }
-    }
-  });
+  // Use the new helper method to properly dispose of resources and return to pool
+  this.cleanupSceneNode(oldNode);
   
   delete(this.markers[key]);
   delete(this.updatedTime[key]);
@@ -208,4 +201,50 @@ ROS3D.MarkerClient.prototype.checkExpiredMarkers = function() {
   // Schedule next check
   var that = this;
   setTimeout(function() { that.checkExpiredMarkers(); }, 1000); // Check every second
+};
+
+// Helper method to recursively clean up a SceneNode and return its object to pool
+ROS3D.MarkerClient.prototype.cleanupSceneNode = function(node) {
+  // 清理所有子对象
+  for (let i = node.children.length - 1; i >= 0; i--) {
+    const child = node.children[i];
+    this.cleanupObject(child);
+    node.remove(child);
+  }
+  
+  // 从对象池返回对象
+  if (node.object && node.object instanceof ROS3D.Marker) { // Only return ROS3D.Marker to pool
+    ROS3D.resourceManager.returnToPool('marker', node.object);
+  }
+};
+
+// Helper method to recursively dispose of an object's resources
+ROS3D.MarkerClient.prototype.cleanupObject = function(object) {
+  // 清理几何体
+  if (object.geometry && typeof object.geometry.dispose === 'function') {
+    object.geometry.dispose();
+  }
+  
+  // 清理材质
+  if (object.material) {
+    if (Array.isArray(object.material)) {
+      object.material.forEach(material => {
+        if (typeof material.dispose === 'function') {
+          material.dispose();
+        }
+      });
+    } else if (typeof object.material.dispose === 'function') {
+      object.material.dispose();
+    }
+  }
+  
+  // 清理纹理
+  if (object.material && object.material.map && typeof object.material.map.dispose === 'function') {
+    object.material.map.dispose();
+  }
+  
+  // 递归清理子对象
+  if (object.children) {
+    object.children.forEach(child => this.cleanupObject(child));
+  }
 };

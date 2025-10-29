@@ -32,6 +32,39 @@ ROS3D.Marker = function(options) {
     this.msgScale = [1,1,1];
   }
   this.msgColor = message.color;
+  this.msgMesh = undefined; // Reset msgMesh
+
+  // Call init method to set up the marker
+  this.init(options);
+};
+
+// Initialize or re-initialize the marker with new options
+ROS3D.Marker.prototype.init = function(options) {
+  options = options || {};
+  var path = options.path || '/';
+  var message = options.message;
+
+  // Clear existing children if re-initializing
+  this.children.forEach(child => {
+    // Dispose child resources if they have a dispose method
+    if (child.dispose && typeof child.dispose === 'function') {
+        child.dispose();
+    }
+    this.remove(child);
+  });
+
+  // check for a trailing '/'
+  if (path.substr(path.length - 1) !== '/') {
+    path += '/';
+  }
+
+  if(message.scale) {
+    this.msgScale = [message.scale.x, message.scale.y, message.scale.z];
+  }
+  else {
+    this.msgScale = [1,1,1];
+  }
+  this.msgColor = message.color;
   this.msgMesh = undefined;
 
   // set the pose and get the color
@@ -394,8 +427,25 @@ ROS3D.Marker.prototype.update = function(message) {
           break;
       case ROS3D.MARKER_CUBE_LIST:
       case ROS3D.MARKER_SPHERE_LIST:
-          // TODO Support to update color for MARKER_CUBE_LIST & MARKER_SPHERE_LIST
-          return false;
+          var instancedMesh = this.children[0];
+          // If the number of points changes, we cannot update in place, so force recreation.
+          if (!instancedMesh || message.points.length !== instancedMesh.count) {
+              return false;
+          }
+          
+          var matrix = new THREE.Matrix4();
+          var position = new THREE.Vector3();
+          var scale = new THREE.Vector3(1, 1, 1); // Scale is handled by geometry
+          var quaternion = new THREE.Quaternion();
+          
+          // Update positions for each instance
+          for (var i = 0; i < message.points.length; i++) {
+            position.set(message.points[i].x, message.points[i].y, message.points[i].z);
+            matrix.compose(position, quaternion, scale);
+            instancedMesh.setMatrixAt(i, matrix);
+          }
+          instancedMesh.instanceMatrix.needsUpdate = true;
+          return true;
       default:
           return false;
       }
@@ -477,6 +527,6 @@ ROS3D.Marker.prototype.dispose = function() {
           element.material.dispose();
       }
     }
-    element.parent.remove(element);
+    // element.parent.remove(element); // Removed this line
   });
 };

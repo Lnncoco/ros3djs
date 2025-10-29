@@ -66,26 +66,55 @@ ROS3D.PoseArray.prototype.processMessage = function(message){
   for(var i=0;i<message.poses.length;i++){
       var lineGeometry = new THREE.BufferGeometry();
 
-      var v3 = new THREE.Vector3( message.poses[i].position.x, message.poses[i].position.y,
+      var v3_pos = new THREE.Vector3( message.poses[i].position.x, message.poses[i].position.y,
                                   message.poses[i].position.z);
-      lineGeometry.vertices.push(v3);
 
       var rot = new THREE.Quaternion(message.poses[i].orientation.x, message.poses[i].orientation.y,
                                      message.poses[i].orientation.z, message.poses[i].orientation.w);
 
-      var tip = new THREE.Vector3(this.length,0,0);
-      var side1 = new THREE.Vector3(this.length*0.8, this.length*0.2, 0);
-      var side2 = new THREE.Vector3(this.length*0.8, -this.length*0.2, 0);
-      tip.applyQuaternion(rot);
-      side1.applyQuaternion(rot);
-      side2.applyQuaternion(rot);
+      var tip_rel = new THREE.Vector3(this.length,0,0);
+      var side1_rel = new THREE.Vector3(this.length*0.8, this.length*0.2, 0);
+      var side2_rel = new THREE.Vector3(this.length*0.8, -this.length*0.2, 0);
 
-      lineGeometry.vertices.push(tip.add(v3));
-      lineGeometry.vertices.push(side1.add(v3));
-      lineGeometry.vertices.push(side2.add(v3));
-      lineGeometry.vertices.push(tip);
+      tip_rel.applyQuaternion(rot);
+      side1_rel.applyQuaternion(rot);
+      side2_rel.applyQuaternion(rot);
 
-      lineGeometry.computeLineDistances();
+      var tip_abs = tip_rel.clone().add(v3_pos);
+      var side1_abs = side1_rel.clone().add(v3_pos);
+      var side2_abs = side2_rel.clone().add(v3_pos);
+
+      // 5 vertices for the arrow shape: origin, tip, side1, side2, tip (to close the head)
+      var positions = new Float32Array(5 * 3);
+
+      // Vertex 1: origin (v3_pos)
+      positions[0] = v3_pos.x;
+      positions[1] = v3_pos.y;
+      positions[2] = v3_pos.z;
+
+      // Vertex 2: tip_abs
+      positions[3] = tip_abs.x;
+      positions[4] = tip_abs.y;
+      positions[5] = tip_abs.z;
+
+      // Vertex 3: side1_abs
+      positions[6] = side1_abs.x;
+      positions[7] = side1_abs.y;
+      positions[8] = side1_abs.z;
+
+      // Vertex 4: side2_abs
+      positions[9] = side2_abs.x;
+      positions[10] = side2_abs.y;
+      positions[11] = side2_abs.z;
+
+      // Vertex 5: tip_abs (to close the arrow head)
+      positions[12] = tip_abs.x;
+      positions[13] = tip_abs.y;
+      positions[14] = tip_abs.z;
+
+      lineGeometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+
+      // lineGeometry.computeLineDistances(); // Not needed/deprecated for BufferGeometry with Line
       var lineMaterial = new THREE.LineBasicMaterial( { color: this.color } );
       line = new THREE.Line( lineGeometry, lineMaterial );
 

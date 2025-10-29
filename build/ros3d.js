@@ -625,9 +625,9 @@ ROS3D.OcTreeBase.prototype.buildGeometry = function () {
     opacity: this.opacity
   });
 
-  geometry.addAttribute('position', new THREE.BufferAttribute(new Float32Array(vertices), 3));
-  geometry.addAttribute('normal', new THREE.BufferAttribute(new Float32Array(normals), 3));
-  geometry.addAttribute('color', new THREE.BufferAttribute(new Float32Array(colors), 3));
+  geometry.setAttribute('position', new THREE.BufferAttribute(new Float32Array(vertices), 3));
+  geometry.setAttribute('normal', new THREE.BufferAttribute(new Float32Array(normals), 3));
+  geometry.setAttribute('color', new THREE.BufferAttribute(new Float32Array(colors), 3));
 
   geometry.setIndex(indices);
 
@@ -1115,15 +1115,13 @@ ROS3D.DepthCloud.prototype.initStreamer = function() {
   if (this.metaLoaded) {
     this.texture = new THREE.Texture(this.video);
     this.geometry = new THREE.BufferGeometry();
-
+    var positions = new Float32Array(this.width * this.height * 3);
     for (var i = 0, l = this.width * this.height; i < l; i++) {
-
-      var vertex = new THREE.Vector3();
-      vertex.x = (i % this.width);
-      vertex.y = Math.floor(i / this.width);
-
-      this.geometry.vertices.push(vertex);
+      positions[i * 3] = (i % this.width);
+      positions[i * 3 + 1] = Math.floor(i / this.width);
+      positions[i * 3 + 2] = 0; // Z-coordinate, assuming 2D plane for depth cloud initialization
     }
+    this.geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
 
     this.material = new THREE.ShaderMaterial({
       uniforms : {
@@ -2420,96 +2418,6 @@ ROS3D.InteractiveMarkerClient.prototype.eraseIntMarker = function(intMarkerName)
 
 /**
  * @fileOverview
- * @author ROS3D development team
- * @description Manager for instanced rendering of marker lists to improve performance
- */
-
-/**
- * A manager for instanced rendering of marker lists.
- *
- * @constructor
- * @param options - object with following keys:
- */
-ROS3D.InstancedMarkerManager = function() {
-  this.instancedMeshes = new Map(); // 按类型缓存实例化网格
-  this.freeIndices = new Map(); // 跟踪可用索引
-};
-
-/**
- * Get or create an instanced mesh for the given type.
- */
-ROS3D.InstancedMarkerManager.prototype.getOrCreateInstancedMesh = function(type, maxCount, material, geometry) {
-  const key = `${type}_${maxCount}`;
-  
-  if (!this.instancedMeshes.has(key)) {
-    const instancedMesh = new THREE.InstancedMesh(geometry, material, maxCount);
-    this.instancedMeshes.set(key, instancedMesh);
-    
-    // Initialize with all indices as free
-    const freeSet = new Set();
-    for (let i = 0; i < maxCount; i++) {
-      freeSet.add(i);
-    }
-    this.freeIndices.set(key, freeSet);
-  }
-  
-  return this.instancedMeshes.get(key);
-};
-
-/**
- * Update an instance at the given index with new transform.
- */
-ROS3D.InstancedMarkerManager.prototype.updateInstance = function(instancedMesh, index, position, scale, quaternion) {
-  const matrix = new THREE.Matrix4();
-  matrix.compose(position, quaternion, scale);
-  instancedMesh.setMatrixAt(index, matrix);
-  instancedMesh.instanceMatrix.needsUpdate = true;
-};
-
-/**
- * Free an instance index for reuse.
- */
-ROS3D.InstancedMarkerManager.prototype.freeInstance = function(type, maxCount, index) {
-  const key = `${type}_${maxCount}`;
-  if (this.freeIndices.has(key)) {
-    this.freeIndices.get(key).add(index);
-  }
-};
-
-/**
- * Get a free instance index.
- */
-ROS3D.InstancedMarkerManager.prototype.getFreeIndex = function(type, maxCount) {
-  const key = `${type}_${maxCount}`;
-  if (this.freeIndices.has(key)) {
-    const freeSet = this.freeIndices.get(key);
-    if (freeSet.size > 0) {
-      // Get and remove the first available index
-      const index = freeSet.values().next().value;
-      freeSet.delete(index);
-      return index;
-    }
-  }
-  return -1; // No free index available
-};
-
-/**
- * Remove and dispose an instanced mesh.
- */
-ROS3D.InstancedMarkerManager.prototype.removeInstancedMesh = function(type, maxCount) {
-  const key = `${type}_${maxCount}`;
-  if (this.instancedMeshes.has(key)) {
-    const instancedMesh = this.instancedMeshes.get(key);
-    instancedMesh.dispose();
-    this.instancedMeshes.delete(key);
-    this.freeIndices.delete(key);
-  }
-};
-
-// Global instance
-ROS3D.instancedMarkerManager = new ROS3D.InstancedMarkerManager();
-/**
- * @fileOverview
  * @author David Gossow - dgossow@willowgarage.com
  * @author Russell Toris - rctoris@wpi.edu
  */
@@ -2529,6 +2437,39 @@ ROS3D.Marker = function(options) {
   options = options || {};
   var path = options.path || '/';
   var message = options.message;
+
+  // check for a trailing '/'
+  if (path.substr(path.length - 1) !== '/') {
+    path += '/';
+  }
+
+  if(message.scale) {
+    this.msgScale = [message.scale.x, message.scale.y, message.scale.z];
+  }
+  else {
+    this.msgScale = [1,1,1];
+  }
+  this.msgColor = message.color;
+  this.msgMesh = undefined; // Reset msgMesh
+
+  // Call init method to set up the marker
+  this.init(options);
+};
+
+// Initialize or re-initialize the marker with new options
+ROS3D.Marker.prototype.init = function(options) {
+  options = options || {};
+  var path = options.path || '/';
+  var message = options.message;
+
+  // Clear existing children if re-initializing
+  this.children.forEach(child => {
+    // Dispose child resources if they have a dispose method
+    if (child.dispose && typeof child.dispose === 'function') {
+        child.dispose();
+    }
+    this.remove(child);
+  });
 
   // check for a trailing '/'
   if (path.substr(path.length - 1) !== '/') {
@@ -2904,8 +2845,25 @@ ROS3D.Marker.prototype.update = function(message) {
           break;
       case ROS3D.MARKER_CUBE_LIST:
       case ROS3D.MARKER_SPHERE_LIST:
-          // TODO Support to update color for MARKER_CUBE_LIST & MARKER_SPHERE_LIST
-          return false;
+          var instancedMesh = this.children[0];
+          // If the number of points changes, we cannot update in place, so force recreation.
+          if (!instancedMesh || message.points.length !== instancedMesh.count) {
+              return false;
+          }
+          
+          var matrix = new THREE.Matrix4();
+          var position = new THREE.Vector3();
+          var scale = new THREE.Vector3(1, 1, 1); // Scale is handled by geometry
+          var quaternion = new THREE.Quaternion();
+          
+          // Update positions for each instance
+          for (var i = 0; i < message.points.length; i++) {
+            position.set(message.points[i].x, message.points[i].y, message.points[i].z);
+            matrix.compose(position, quaternion, scale);
+            instancedMesh.setMatrixAt(i, matrix);
+          }
+          instancedMesh.instanceMatrix.needsUpdate = true;
+          return true;
       default:
           return false;
       }
@@ -2987,7 +2945,7 @@ ROS3D.Marker.prototype.dispose = function() {
           element.material.dispose();
       }
     }
-    element.parent.remove(element);
+    // element.parent.remove(element); // Removed this line
   });
 };
 
@@ -3226,11 +3184,21 @@ ROS3D.MarkerClient.prototype.processMessage = function(message){
       this.checkTime(message.ns + message.id);
     }
 
-    // Create new marker
-    var newMarker = new ROS3D.Marker({
-      message : message,
-      path : this.path,
-    });
+    // Create new marker (or get from pool)
+    var newMarker = ROS3D.resourceManager.getObjectFromPool('marker');
+    if (newMarker) {
+        // Re-initialize the pooled marker
+        newMarker.init({
+            message : message,
+            path : this.path,
+        });
+    } else {
+        // If pool is empty or type not defined, create a new one
+        newMarker = new ROS3D.Marker({
+            message : message,
+            path : this.path,
+        });
+    }
 
     this.markers[key] = new ROS3D.SceneNode({
       frameID : message.header.frame_id,
@@ -3261,25 +3229,8 @@ ROS3D.MarkerClient.prototype.removeMarker = function(key) {
   oldNode.unsubscribeTf();
   this.rootObject.remove(oldNode);
   
-  // Properly dispose of geometry and materials in the scene graph
-  oldNode.traverse(function(object) {
-    if (object.geometry) {
-      object.geometry.dispose();
-    }
-    if (object.material) {
-      if (Array.isArray(object.material)) {
-        object.material.forEach(function(material) {
-          if (material && typeof material.dispose === 'function') {
-            material.dispose();
-          }
-        });
-      } else {
-        if (object.material && typeof object.material.dispose === 'function') {
-          object.material.dispose();
-        }
-      }
-    }
-  });
+  // Use the new helper method to properly dispose of resources and return to pool
+  this.cleanupSceneNode(oldNode);
   
   delete(this.markers[key]);
   delete(this.updatedTime[key]);
@@ -3318,6 +3269,52 @@ ROS3D.MarkerClient.prototype.checkExpiredMarkers = function() {
   setTimeout(function() { that.checkExpiredMarkers(); }, 1000); // Check every second
 };
 
+// Helper method to recursively clean up a SceneNode and return its object to pool
+ROS3D.MarkerClient.prototype.cleanupSceneNode = function(node) {
+  // 清理所有子对象
+  for (let i = node.children.length - 1; i >= 0; i--) {
+    const child = node.children[i];
+    this.cleanupObject(child);
+    node.remove(child);
+  }
+  
+  // 从对象池返回对象
+  if (node.object && node.object instanceof ROS3D.Marker) { // Only return ROS3D.Marker to pool
+    ROS3D.resourceManager.returnToPool('marker', node.object);
+  }
+};
+
+// Helper method to recursively dispose of an object's resources
+ROS3D.MarkerClient.prototype.cleanupObject = function(object) {
+  // 清理几何体
+  if (object.geometry && typeof object.geometry.dispose === 'function') {
+    object.geometry.dispose();
+  }
+  
+  // 清理材质
+  if (object.material) {
+    if (Array.isArray(object.material)) {
+      object.material.forEach(material => {
+        if (typeof material.dispose === 'function') {
+          material.dispose();
+        }
+      });
+    } else if (typeof object.material.dispose === 'function') {
+      object.material.dispose();
+    }
+  }
+  
+  // 清理纹理
+  if (object.material && object.material.map && typeof object.material.map.dispose === 'function') {
+    object.material.map.dispose();
+  }
+  
+  // 递归清理子对象
+  if (object.children) {
+    object.children.forEach(child => this.cleanupObject(child));
+  }
+};
+
 /**
  * @fileOverview
  * @author David Gossow - dgossow@willowgarage.com
@@ -3350,21 +3347,21 @@ ROS3D.Arrow = function(options) {
   var shaftLength = length - headLength;
 
   // create and merge geometry
-  var geometry = new THREE.CylinderGeometry(shaftDiameter * 0.5, shaftDiameter * 0.5, shaftLength,
+  var shaftGeometry = new THREE.CylinderGeometry(shaftDiameter * 0.5, shaftDiameter * 0.5, shaftLength,
       12, 1);
   var m = new THREE.Matrix4();
   m.setPosition(new THREE.Vector3(0, shaftLength * 0.5, 0));
-  geometry.applyMatrix(m);
+  shaftGeometry.applyMatrix4(m);
 
   // create the head
   var coneGeometry = new THREE.CylinderGeometry(0, headDiameter * 0.5, headLength, 12, 1);
   m.setPosition(new THREE.Vector3(0, shaftLength + (headLength * 0.5), 0));
-  coneGeometry.applyMatrix(m);
+  coneGeometry.applyMatrix4(m);
 
   // put the arrow together
-  geometry.merge(coneGeometry);
+  shaftGeometry.merge(coneGeometry);
 
-  THREE.Mesh.call(this, geometry, material);
+  THREE.Mesh.call(this, shaftGeometry, material);
 
   this.position.copy(origin);
   this.setDirection(direction);
@@ -4497,13 +4494,15 @@ ROS3D.Path.prototype.processMessage = function(message){
   }
 
   var lineGeometry = new THREE.BufferGeometry();
+  var positions = new Float32Array(message.poses.length * 3); // Allocate array
   for(var i=0; i<message.poses.length;i++){
-      var v3 = new THREE.Vector3( message.poses[i].pose.position.x, message.poses[i].pose.position.y,
-                                  message.poses[i].pose.position.z);
-      lineGeometry.vertices.push(v3);
+      positions[i * 3] = message.poses[i].pose.position.x;
+      positions[i * 3 + 1] = message.poses[i].pose.position.y;
+      positions[i * 3 + 2] = message.poses[i].pose.position.z;
   }
+  lineGeometry.setAttribute('position', new THREE.BufferAttribute(positions, 3)); // Set attribute
 
-  lineGeometry.computeLineDistances();
+  // lineGeometry.computeLineDistances(); // Not needed/deprecated for BufferGeometry with Line
   var lineMaterial = new THREE.LineBasicMaterial( { color: this.color } );
   var line = new THREE.Line( lineGeometry, lineMaterial );
 
@@ -4654,16 +4653,21 @@ ROS3D.Polygon.prototype.processMessage = function(message){
   }
 
   var lineGeometry = new THREE.BufferGeometry();
-  var v3;
+  // Polygon needs to close the loop, so message.polygon.points.length + 1
+  var positions = new Float32Array((message.polygon.points.length + 1) * 3);
   for(var i=0; i<message.polygon.points.length;i++){
-      v3 = new THREE.Vector3( message.polygon.points[i].x, message.polygon.points[i].y,
-                              message.polygon.points[i].z);
-      lineGeometry.vertices.push(v3);
+      positions[i * 3] = message.polygon.points[i].x;
+      positions[i * 3 + 1] = message.polygon.points[i].y;
+      positions[i * 3 + 2] = message.polygon.points[i].z;
   }
-  v3 = new THREE.Vector3( message.polygon.points[0].x, message.polygon.points[0].y,
-                          message.polygon.points[0].z);
-  lineGeometry.vertices.push(v3);
-  lineGeometry.computeLineDistances();
+  // Close the loop
+  positions[message.polygon.points.length * 3] = message.polygon.points[0].x;
+  positions[message.polygon.points.length * 3 + 1] = message.polygon.points[0].y;
+  positions[message.polygon.points.length * 3 + 2] = message.polygon.points[0].z;
+
+  lineGeometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+
+  // lineGeometry.computeLineDistances(); // Not needed/deprecated for BufferGeometry with Line
   var lineMaterial = new THREE.LineBasicMaterial( { color: this.color } );
   var line = new THREE.Line( lineGeometry, lineMaterial );
 
@@ -4827,26 +4831,55 @@ ROS3D.PoseArray.prototype.processMessage = function(message){
   for(var i=0;i<message.poses.length;i++){
       var lineGeometry = new THREE.BufferGeometry();
 
-      var v3 = new THREE.Vector3( message.poses[i].position.x, message.poses[i].position.y,
+      var v3_pos = new THREE.Vector3( message.poses[i].position.x, message.poses[i].position.y,
                                   message.poses[i].position.z);
-      lineGeometry.vertices.push(v3);
 
       var rot = new THREE.Quaternion(message.poses[i].orientation.x, message.poses[i].orientation.y,
                                      message.poses[i].orientation.z, message.poses[i].orientation.w);
 
-      var tip = new THREE.Vector3(this.length,0,0);
-      var side1 = new THREE.Vector3(this.length*0.8, this.length*0.2, 0);
-      var side2 = new THREE.Vector3(this.length*0.8, -this.length*0.2, 0);
-      tip.applyQuaternion(rot);
-      side1.applyQuaternion(rot);
-      side2.applyQuaternion(rot);
+      var tip_rel = new THREE.Vector3(this.length,0,0);
+      var side1_rel = new THREE.Vector3(this.length*0.8, this.length*0.2, 0);
+      var side2_rel = new THREE.Vector3(this.length*0.8, -this.length*0.2, 0);
 
-      lineGeometry.vertices.push(tip.add(v3));
-      lineGeometry.vertices.push(side1.add(v3));
-      lineGeometry.vertices.push(side2.add(v3));
-      lineGeometry.vertices.push(tip);
+      tip_rel.applyQuaternion(rot);
+      side1_rel.applyQuaternion(rot);
+      side2_rel.applyQuaternion(rot);
 
-      lineGeometry.computeLineDistances();
+      var tip_abs = tip_rel.clone().add(v3_pos);
+      var side1_abs = side1_rel.clone().add(v3_pos);
+      var side2_abs = side2_rel.clone().add(v3_pos);
+
+      // 5 vertices for the arrow shape: origin, tip, side1, side2, tip (to close the head)
+      var positions = new Float32Array(5 * 3);
+
+      // Vertex 1: origin (v3_pos)
+      positions[0] = v3_pos.x;
+      positions[1] = v3_pos.y;
+      positions[2] = v3_pos.z;
+
+      // Vertex 2: tip_abs
+      positions[3] = tip_abs.x;
+      positions[4] = tip_abs.y;
+      positions[5] = tip_abs.z;
+
+      // Vertex 3: side1_abs
+      positions[6] = side1_abs.x;
+      positions[7] = side1_abs.y;
+      positions[8] = side1_abs.z;
+
+      // Vertex 4: side2_abs
+      positions[9] = side2_abs.x;
+      positions[10] = side2_abs.y;
+      positions[11] = side2_abs.z;
+
+      // Vertex 5: tip_abs (to close the arrow head)
+      positions[12] = tip_abs.x;
+      positions[13] = tip_abs.y;
+      positions[14] = tip_abs.z;
+
+      lineGeometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+
+      // lineGeometry.computeLineDistances(); // Not needed/deprecated for BufferGeometry with Line
       var lineMaterial = new THREE.LineBasicMaterial( { color: this.color } );
       line = new THREE.Line( lineGeometry, lineMaterial );
 
@@ -5070,7 +5103,7 @@ ROS3D.NavSatFix = function(options) {
 
   this.geom = new THREE.BufferGeometry();
   this.vertices = new THREE.BufferAttribute(new Float32Array( 6 * this.keep ), 3 );
-  this.geom.addAttribute( 'position',  this.vertices);
+  this.geom.setAttribute( 'position',  this.vertices);
   this.material = material.isMaterial ? material : new THREE.LineBasicMaterial( material );
   this.line = new THREE.Line( this.geom, this.material );
   this.rootObject.add(this.object3d);
