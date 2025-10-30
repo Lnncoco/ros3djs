@@ -1,0 +1,164 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>ROS3D.js 示例 - 基础场景</title>
+  <style>
+    body { 
+      margin: 0; 
+      overflow: hidden; 
+      font-family: Arial, sans-serif;
+    }
+    #info {
+      position: absolute;
+      top: 10px;
+      left: 10px;
+      background: rgba(0,0,0,0.7);
+      color: white;
+      padding: 10px;
+      border-radius: 5px;
+      z-index: 100;
+      font-size: 14px;
+    }
+    #container { 
+      width: 100vw; 
+      height: 100vh; 
+    }
+    #controls {
+      position: absolute;
+      top: 10px;
+      right: 10px;
+      background: rgba(0,0,0,0.7);
+      color: white;
+      padding: 10px;
+      border-radius: 5px;
+      z-index: 100;
+      font-size: 14px;
+    }
+  </style>
+</head>
+<body>
+  <div id="info">
+    <h3>ROS3D.js 示例 - 基础场景</h3>
+    <p>包含: 网格、坐标轴、箭头、标记</p>
+  </div>
+  <div id="controls">
+    <p>鼠标操作:</p>
+    <p>- 左键: 旋转视角</p>
+    <p>- 右键: 平移视角</p>
+    <p>- 滚轮: 缩放</p>
+  </div>
+  <div id="container"></div>
+
+  <script type="module">
+    // 从构建输出目录导入
+    import * as THREE from 'three';
+    window.THREE = THREE;
+
+    import { Viewer, Grid, Axes, Arrow, Marker } from '../dist/ros3d.es.js';
+    
+    // 等待页面加载完成
+    window.addEventListener('load', function() {
+      console.log('ROS3D.js 示例 - 基础场景');
+      
+      // 创建查看器
+      const viewer = new Viewer({
+        divID: 'container',
+        width: window.innerWidth,
+        height: window.innerHeight,
+        antialias: true,
+        background: '#cccccc'
+      });
+      
+      // 添加网格
+      const grid = new Grid({
+        num_cells: 10,
+        cellSize: 1,
+        color: '#aaaaaa'
+      });
+      viewer.addObject(grid);
+      
+      // 添加坐标轴
+      const axes = new Axes({
+        shaftRadius: 0.05,
+        headRadius: 0.1,
+        headLength: 0.3
+      });
+      viewer.addObject(axes);
+      
+      // 添加箭头
+      const arrow = new Arrow({
+        direction: new window.THREE.Vector3(1, 0, 0),
+        origin: new window.THREE.Vector3(-2, 0, 0),
+        length: 1.5,
+        shaftDiameter: 0.1,
+        headDiameter: 0.2,
+        headLength: 0.3
+      });
+      viewer.addObject(arrow);
+      
+      // 添加立方体标记
+      const cubeMarker = new Marker({
+        message: {
+          type: 1, // CUBE
+          pose: {
+            position: { x: 2, y: 0, z: 0 },
+            orientation: { x: 0, y: 0, z: 0, w: 1 }
+          }
+        }
+      });
+      viewer.addObject(cubeMarker);
+      
+      // 添加球体标记
+      const sphereMarker = new Marker({
+        message: {
+          type: 1, // CUBE (使用CUBE代替SPHERE以避免THREE依赖问题)
+          pose: {
+            position: { x: 0, y: 2, z: 0 },
+            orientation: { x: 0, y: 0, z: 0, w: 1 }
+          }
+        }
+      });
+      viewer.addObject(sphereMarker);
+      
+      // 添加圆柱体标记
+      const cylinderMarker = new Marker({
+        message: {
+          type: 1, // CUBE (使用CUBE代替CYLINDER以避免THREE依赖问题)
+          pose: {
+            position: { x: 0, y: -2, z: 0 },
+            orientation: { x: 0, y: 0, z: 0, w: 1 }
+          }
+        }
+      });
+      viewer.addObject(cylinderMarker);
+      
+      // 添加线条标记
+      const lineMarker = new Marker({
+        message: {
+          type: 4, // LINE_STRIP
+          points: [
+            {x: -1, y: -1, z: 0},
+            {x: -1, y: 1, z: 0.5},
+            {x: 1, y: 1, z: 0},
+            {x: 1, y: -1, z: 0.5}
+          ],
+          pose: {
+            position: { x: 0, y: 0, z: 0 },
+            orientation: { x: 0, y: 0, z: 0, w: 1 }
+          }
+        }
+      });
+      viewer.addObject(lineMarker);
+      
+      // 窗口大小变化时调整查看器
+      window.addEventListener('resize', function() {
+        viewer.resize(window.innerWidth, window.innerHeight);
+      });
+      
+      console.log('示例场景创建完成');
+    });
+  </script>
+</body>
+</html>

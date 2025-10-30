@@ -4,65 +4,46 @@
  * @author Russell Toris - rctoris@wpi.edu
  */
 
+import * as THREE from 'three';
+
 /**
  * A SceneNode can be used to keep track of a 3D object with respect to a ROS frame within a scene.
- *
- * @constructor
- * @param options - object with following keys:
- *
- *  * tfClient - a handle to the TF client
- *  * frameID - the frame ID this object belongs to
- *  * pose (optional) - the pose associated with this object
- *  * object - the THREE 3D object to be rendered
  */
-ROS3D.SceneNode = function(options) {
-  THREE.Object3D.call(this);
-  options = options || {};
-  this.tfClient = options.tfClient;
-  this.frameID = options.frameID;
-  var object = options.object;
-  this.pose = options.pose || new ROSLIB.Pose();
+export class SceneNode extends THREE.Object3D {
+  /**
+   * @param options - object with following keys:
+   *  * tfClient - a handle to the TF client
+   *  * frameID - the frame ID this object belongs to
+   *  * pose (optional) - the pose associated with this object
+   *  * object - the THREE 3D object to be rendered
+   */
+  constructor(options = {}) {
+    super();
+    this.tfClient = options.tfClient;
+    this.frameID = options.frameID;
+    const object = options.object;
+    this.pose = options.pose || new THREE.Pose();
 
-  // Do not render this object until we receive a TF update
-  this.visible = false;
+    // Add the object to the scene node
+    if (object) {
+      this.add(object);
+    }
 
-  // add the model
-  this.add(object);
-
-  // set the inital pose
-  this.updatePose(this.pose);
-
-  // save the TF handler so we can remove it later
-  this.tfUpdate = function(msg) {
-
-    // apply the transform
-    var tf = new ROSLIB.Transform(msg);
-    var poseTransformed = new ROSLIB.Pose(this.pose);
-    poseTransformed.applyTransform(tf);
-
-    // update the world
-    this.updatePose(poseTransformed);
-    this.visible = true;
-  };
-
-  // listen for TF updates
-  this.tfUpdateBound = this.tfUpdate.bind(this);
-  this.tfClient.subscribe(this.frameID, this.tfUpdateBound);
-};
-ROS3D.SceneNode.prototype.__proto__ = THREE.Object3D.prototype;
-
-/**
- * Set the pose of the associated model.
- *
- * @param pose - the pose to update with
- */
-ROS3D.SceneNode.prototype.updatePose = function(pose) {
-  this.position.set( pose.position.x, pose.position.y, pose.position.z );
-  this.quaternion.set(pose.orientation.x, pose.orientation.y,
-      pose.orientation.z, pose.orientation.w);
-  this.updateMatrixWorld(true);
-};
-
-ROS3D.SceneNode.prototype.unsubscribeTf = function() {
-  this.tfClient.unsubscribe(this.frameID, this.tfUpdateBound);
-};
+    // Subscribe to the TF topic
+    if (this.tfClient) {
+      this.tfClient.subscribe(this.frameID, (transform) => {
+        // Update the position and orientation of the object
+        if (transform) {
+          this.position.set(transform.translation.x, transform.translation.y, transform.translation.z);
+          this.quaternion.set(transform.rotation.x, transform.rotation.y, transform.rotation.z, transform.rotation.w);
+        }
+      });
+    } else {
+      // Set the pose if no TF client is available
+      if (options.pose) {
+        this.position.set(options.pose.position.x, options.pose.position.y, options.pose.position.z);
+        this.quaternion.set(options.pose.orientation.x, options.pose.orientation.y, options.pose.orientation.z, options.pose.orientation.w);
+      }
+    }
+  }
+}

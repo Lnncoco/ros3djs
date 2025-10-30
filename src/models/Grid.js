@@ -3,58 +3,29 @@
  * @author Russell Toris - rctoris@wpi.edu
  */
 
+import * as THREE from 'three';
+
 /**
  * Create a grid object.
- *
- * @constructor
- * @param options - object with following keys:
- *
- *  * num_cells (optional) - The number of cells of the grid
- *  * color (optional) - the line color of the grid, like '#cccccc'
- *  * lineWidth (optional) - the width of the lines in the grid
- *  * cellSize (optional) - The length, in meters, of the side of each cell
  */
+export class Grid extends THREE.Object3D {
+  /**
+   * @param options - object with following keys:
+   *  * num_cells (optional) - The number of cells of the grid
+   *  * color (optional) - the line color of the grid, like '#cccccc'
+   *  * lineWidth (optional) - the width of the lines in the grid
+   *  * cellSize (optional) - The length, in meters, of the side of each cell
+   */
+  constructor(options = {}) {
+    super();
+    const num_cells = options.num_cells || 10;
+    const color = options.color || '#cccccc';
+    const lineWidth = options.lineWidth || 1;
+    const cellSize = options.cellSize || 1;
 
-ROS3D.Grid = function(options) {
-  options = options || {};
-  var num_cells = options.num_cells || 10;
-  var color = options.color || '#cccccc';
-  var lineWidth = options.lineWidth || 1;
-  var cellSize = options.cellSize || 1;
-
-  THREE.Object3D.call(this);
-
-  var material = new THREE.LineBasicMaterial({
-    color: new THREE.Color(color),
-    linewidth: lineWidth
-  });
-
-  var edges = [];
-
-  for (var i = 0; i <= num_cells; ++i) {
-    var edge = cellSize * num_cells / 2;
-    var position = edge - (i * cellSize);
-
-    // Horizontal lines
-    edges.push(
-      new THREE.Vector3(-edge, position, 0),
-      new THREE.Vector3(edge, position, 0)
-    );
-
-    // Vertical lines
-    edges.push(
-      new THREE.Vector3(position, -edge, 0),
-      new THREE.Vector3(position, edge, 0)
-    );
+    // Create the mesh
+    const grid = new THREE.GridHelper(num_cells * cellSize, num_cells, color, color);
+    grid.type = 'GridHelper';
+    this.add(grid);
   }
-
-
-  var geometry = new THREE.BufferGeometry().setFromPoints(edges);
-
-  // Define lines with the geometry
-  var lineSegments = new THREE.LineSegments(geometry, material);
-
-  this.add(lineSegments);
-};
-
-ROS3D.Grid.prototype.__proto__ = THREE.Object3D.prototype;
+}

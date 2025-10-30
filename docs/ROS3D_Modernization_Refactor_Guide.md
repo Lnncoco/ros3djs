@@ -5,11 +5,12 @@
 ROS3D.js 是一个连接 ROS (Robot Operating System) 和 Three.js 的桥梁，提供在 Web 浏览器中可视化 ROS 数据和机器人模型的功能。
 
 ### 1.1 当前技术栈
-- **渲染引擎**: Three.js
+- **渲染引擎**: Three.js (v0.118.3)
 - **ROS通信**: roslibjs 
 - **事件系统**: EventEmitter3 + Three.js EventDispatcher
-- **构建系统**: Grunt + Rollup
-- **代码风格**: 全局变量模式，函数构造器，原型链继承
+- **构建系统**: Grunt + Rollup (旧版) → Vite (新版)
+- **代码风格**: 全局变量模式，函数构造器，原型链继承 → ES6模块和类
+- **开发语言**: JavaScript → JavaScript/TypeScript
 
 ### 1.2 核心功能
 - URDF 机器人模型可视化
@@ -128,9 +129,11 @@ WebGL Rendering
 
 ### 3.3 技术选型
 - **模块系统**: ES6 Modules
-- **构建工具**: 现代 Rollup 配置
+- **构建工具**: Vite（取代 Grunt 和旧版 Rollup）
 - **类系统**: ES6 `class` 和 `extends`
 - **依赖管理**: 明确的 import/export
+- **开发语言**: TypeScript（可选，提供类型安全）
+- **包管理**: npm/yarn/pnpm 现代包管理器
 
 ## 4. 架构设计
 
@@ -273,19 +276,43 @@ export class Marker extends Object3D {
 
 ### 5.9 构建和打包
 - **问题**: 确保现代构建系统支持多种输出格式
-- **解决方案**: 使用现代 Rollup 配置
+- **解决方案**: 使用 Vite 构建工具（取代 Grunt 和旧版 Rollup）
 - **注意事项**: 
   - 支持 ESM、CJS、IIFE 多种输出格式
   - 保持 tree-shaking 优化
   - 确保外部依赖正确处理 (three, roslib, eventemitter3)
   - 验证构建产物大小和加载性能
+  - 利用 Vite 的快速开发服务器和热模块替换功能
+  - 支持 TypeScript 编译（可选）
+  - 保持与现有 API 的兼容性
+
+### 5.10 Vite 构建方案详细说明
+- **Vite 优势**:
+  - 极快的开发服务器启动速度
+  - 基于原生 ES 模块的快速热模块替换（HMR）
+  - 现代化的构建工具链
+  - 优秀的 TypeScript 支持
+  - 更简单的配置相比传统 Rollup
+
+- **库模式配置**:
+  - 支持多种输出格式（ESM、CJS、IIFE）
+  - 依赖外部化配置（external dependencies）
+  - 代码分割和 Tree-shaking 支持
+  - 生成类型定义文件（可选）
+
+- **迁移策略**:
+  - 保留旧版 Grunt/Rollup 配置用于向后兼容
+  - 新功能开发使用 Vite 构建系统
+  - 逐步迁移构建流程到 Vite
 
 ## 6. 重构实施路线图
 
 ### 第一阶段：基础设施 (1-2周)
-- 设置现代构建系统 (Rollup)
+- 设置现代构建系统 (Vite)
 - 创建模块化目录结构
-- 转换核心工具函数 (constants.js, utils.js)
+- 备份旧代码到 src-legacy 目录
+- 设置新代码目录结构 (src/*)
+- 转换核心工具函数 (constants.ts, utils.ts)
 
 ### 第二阶段：基础组件 (2-3周)
 - 转换基础可视化组件 (Arrow, Axes, Grid等)

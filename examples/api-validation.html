@@ -1,0 +1,296 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>ROS3D.js - API 验证示例</title>
+  <style>
+    body { 
+      margin: 0; 
+      font-family: Arial, sans-serif;
+      padding: 20px;
+      background: #f0f0f0;
+    }
+    .container {
+      max-width: 1200px;
+      margin: 0 auto;
+    }
+    .section {
+      background: white;
+      margin: 20px 0;
+      padding: 20px;
+      border-radius: 8px;
+      box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+    }
+    h1, h2 {
+      color: #333;
+    }
+    .api-list {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+      gap: 10px;
+    }
+    .api-item {
+      padding: 10px;
+      border: 1px solid #ddd;
+      border-radius: 4px;
+    }
+    .status-ok {
+      color: #2ecc71;
+    }
+    .status-error {
+      color: #e74c3c;
+    }
+    button {
+      background: #3498db;
+      color: white;
+      border: none;
+      padding: 10px 15px;
+      border-radius: 4px;
+      cursor: pointer;
+      margin: 5px;
+    }
+    button:hover {
+      background: #2980b9;
+    }
+    #three-canvas {
+      width: 100%;
+      height: 400px;
+      border: 1px solid #ddd;
+      margin-top: 20px;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>ROS3D.js API 验证示例</h1>
+    
+    <div class="section">
+      <h2>API 可用性检查</h2>
+      <div id="api-status" class="api-list">
+        <div class="api-item">检查中...</div>
+      </div>
+    </div>
+    
+    <div class="section">
+      <h2>功能演示</h2>
+      <button id="testConstantsBtn">测试常量</button>
+      <button id="testUtilsBtn">测试工具函数</button>
+      <button id="testClassesBtn">测试类实例化</button>
+      <button id="runAllTestsBtn">运行全部测试</button>
+    </div>
+    
+    <div class="section">
+      <h2>3D 渲染演示</h2>
+      <div id="three-container">
+        <canvas id="three-canvas" width="800" height="400"></canvas>
+      </div>
+    </div>
+    
+    <div class="section">
+      <h2>控制台输出</h2>
+      <pre id="console-output" style="background: #000; color: #0f0; padding: 10px; height: 200px; overflow-y: auto;"></pre>
+    </div>
+  </div>
+
+  <script type="module">
+    import ROS3D from '../dist/ros3d.es.js';
+    
+    // 重定向console输出到页面
+    const originalLog = console.log;
+    const consoleOutput = document.getElementById('console-output');
+    
+    console.log = function(...args) {
+      originalLog.apply(console, args);
+      consoleOutput.textContent += args.join(' ') + '\n';
+      consoleOutput.scrollTop = consoleOutput.scrollHeight;
+    };
+    
+    console.info = function(...args) {
+      originalLog.apply(console, ['INFO:', ...args]);
+      consoleOutput.textContent += 'INFO: ' + args.join(' ') + '\n';
+      consoleOutput.scrollTop = consoleOutput.scrollHeight;
+    };
+    
+    console.error = function(...args) {
+      originalLog.apply(console, ['ERROR:', ...args]);
+      consoleOutput.textContent += 'ERROR: ' + args.join(' ') + '\n';
+      consoleOutput.scrollTop = consoleOutput.scrollHeight;
+    };
+    
+    // 显示API可用性
+    function showApiStatus() {
+      const statusDiv = document.getElementById('api-status');
+      statusDiv.innerHTML = '';
+      
+      // 常量检查
+      const constants = [
+        {name: 'MARKER_CUBE', value: ROS3D.MARKER_CUBE, expected: 1},
+        {name: 'MARKER_SPHERE', value: ROS3D.MARKER_SPHERE, expected: 2},
+        {name: 'MARKER_CYLINDER', value: ROS3D.MARKER_CYLINDER, expected: 3},
+        {name: 'MARKER_ARROW', value: ROS3D.MARKER_ARROW, expected: 0},
+        {name: 'INTERACTIVE_MARKER_KEEP_ALIVE', value: ROS3D.INTERACTIVE_MARKER_KEEP_ALIVE, expected: 0}
+      ];
+      
+      constants.forEach(constant => {
+        const item = document.createElement('div');
+        item.className = 'api-item';
+        item.innerHTML = `
+          <strong>常量:</strong> ${constant.name} = ${constant.value} 
+          <span class="${constant.value === constant.expected ? 'status-ok' : 'status-error'}">
+            ${constant.value === constant.expected ? '✓' : '✗ (期望: ' + constant.expected + ')'}
+          </span>
+        `;
+        statusDiv.appendChild(item);
+      });
+      
+      // 函数检查
+      const functions = [
+        {name: 'makeColorMaterial', check: typeof ROS3D.makeColorMaterial === 'function'},
+        {name: 'intersectPlane', check: typeof ROS3D.intersectPlane === 'function'},
+        {name: 'findClosestPoint', check: typeof ROS3D.findClosestPoint === 'function'},
+        {name: 'closestAxisPoint', check: typeof ROS3D.closestAxisPoint === 'function'}
+      ];
+      
+      functions.forEach(func => {
+        const item = document.createElement('div');
+        item.className = 'api-item';
+        item.innerHTML = `
+          <strong>函数:</strong> ${func.name}
+          <span class="${func.check ? 'status-ok' : 'status-error'}">
+            ${func.check ? '✓ 存在' : '✗ 不存在'}
+          </span>
+        `;
+        statusDiv.appendChild(item);
+      });
+      
+      // 类检查
+      const classes = [
+        {name: 'Viewer', check: typeof ROS3D.Viewer === 'function'},
+        {name: 'SceneNode', check: typeof ROS3D.SceneNode === 'function'},
+        {name: 'Marker', check: typeof ROS3D.Marker === 'function'},
+        {name: 'Grid', check: typeof ROS3D.Grid === 'function'},
+        {name: 'Arrow', check: typeof ROS3D.Arrow === 'function'},
+        {name: 'Axes', check: typeof ROS3D.Axes === 'function'}
+      ];
+      
+      classes.forEach(cls => {
+        const item = document.createElement('div');
+        item.className = 'api-item';
+        item.innerHTML = `
+          <strong>类:</strong> ${cls.name}
+          <span class="${cls.check ? 'status-ok' : 'status-error'}">
+            ${cls.check ? '✓ 存在' : '✗ 不存在'}
+          </span>
+        `;
+        statusDiv.appendChild(item);
+      });
+    }
+    
+    // 测试常量
+    function testConstants() {
+      console.log('--- 测试常量 ---');
+      
+      // 测试标记类型常量
+      console.log('MARKER constants:');
+      console.log('  MARKER_CUBE:', ROS3D.MARKER_CUBE);
+      console.log('  MARKER_SPHERE:', ROS3D.MARKER_SPHERE);
+      console.log('  MARKER_CYLINDER:', ROS3D.MARKER_CYLINDER);
+      
+      // 测试交互标记常量
+      console.log('INTERACTIVE MARKER constants:');
+      console.log('  INTERACTIVE_MARKER_KEEP_ALIVE:', ROS3D.INTERACTIVE_MARKER_KEEP_ALIVE);
+      console.log('  INTERACTIVE_MARKER_POSE_UPDATE:', ROS3D.INTERACTIVE_MARKER_POSE_UPDATE);
+      console.log('--- 常量测试完成 ---');
+    }
+    
+    // 测试工具函数
+    function testUtils() {
+      console.log('--- 测试工具函数 ---');
+      
+      // 测试 makeColorMaterial
+      try {
+        const material = ROS3D.makeColorMaterial(1, 0, 0, 1);
+        console.log('makeColorMaterial: 成功创建材质');
+      } catch(e) {
+        console.error('makeColorMaterial 错误:', e);
+      }
+      
+      // 测试其他工具函数存在性
+      console.log('intersectPlane 函数存在:', typeof ROS3D.intersectPlane === 'function');
+      console.log('findClosestPoint 函数存在:', typeof ROS3D.findClosestPoint === 'function');
+      console.log('closestAxisPoint 函数存在:', typeof ROS3D.closestAxisPoint === 'function');
+      
+      console.log('--- 工具函数测试完成 ---');
+    }
+    
+    // 测试类实例化
+    function testClasses() {
+      console.log('--- 测试类实例化 ---');
+      
+      try {
+        // 测试 Grid
+        const grid = new ROS3D.Grid();
+        console.log('Grid 实例化: 成功');
+      } catch(e) {
+        console.error('Grid 实例化错误:', e);
+      }
+      
+      try {
+        // 测试 Arrow
+        const arrow = new ROS3D.Arrow();
+        console.log('Arrow 实例化: 成功');
+      } catch(e) {
+        console.error('Arrow 实例化错误:', e);
+      }
+      
+      try {
+        // 测试 Axes
+        const axes = new ROS3D.Axes();
+        console.log('Axes 实例化: 成功');
+      } catch(e) {
+        console.error('Axes 实例化错误:', e);
+      }
+      
+      try {
+        // 测试 Marker
+        const marker = new ROS3D.Marker({
+          message: {
+            type: 1, // CUBE
+            pose: {
+              position: { x: 0, y: 0, z: 0 },
+              orientation: { x: 0, y: 0, z: 0, w: 1 }
+            }
+          }
+        });
+        console.log('Marker 实例化: 成功');
+      } catch(e) {
+        console.error('Marker 实例化错误:', e);
+      }
+      
+      console.log('--- 类实例化测试完成 ---');
+    }
+    
+    // 运行全部测试
+    function runAllTests() {
+      testConstants();
+      testUtils();
+      testClasses();
+      showApiStatus();
+    }
+    
+    // 初始化页面
+    document.addEventListener('DOMContentLoaded', function() {
+      console.log('ROS3D.js API 验证示例加载完成');
+      console.log('版本:', ROS3D.REVISION);
+      showApiStatus();
+
+      // 绑定按钮事件
+      document.getElementById('testConstantsBtn').addEventListener('click', testConstants);
+      document.getElementById('testUtilsBtn').addEventListener('click', testUtils);
+      document.getElementById('testClassesBtn').addEventListener('click', testClasses);
+      document.getElementById('runAllTestsBtn').addEventListener('click', runAllTests);
+    });
+  </script>
+</body>
+</html>
