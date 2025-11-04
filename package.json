@@ -19,6 +19,10 @@
     "test:verify": "pnpm build && vitest run"
   },
   "dependencies": {
+    "loglevel": "^1.9.2",
+    "loglevel-plugin-prefix": "^0.8.4"
+  },
+  "peerDependencies": {
     "eventemitter3": "^5.0.1",
     "roslib": "^1.0.0",
     "three": "^0.118.3"

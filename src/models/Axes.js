@@ -1,75 +1,121 @@
 /**
- * @fileOverview
- * @author David Gossow - dgossow@willowgarage.com
+ * @fileOverview 定义了 Axes 类，用于显示一个坐标系的三色轴。
  */
 
-import * as THREE from 'three';
+import * as THREE from "three";
 
 /**
- * An Axes object can be used to display the axis of a particular coordinate frame.
+ * Axes 对象可用于显示特定坐标框架的轴（X-红, Y-绿, Z-蓝）。
  */
 export class Axes extends THREE.Object3D {
   /**
-   * @param options - object with following keys:
-   *   * shaftRadius (optional) - the radius of the shaft to render
-   *   * headRadius (optional) - the radius of the head to render
-   *   * headLength (optional) - the length of the head to render
-   *   * scale (optional) - the scale of the frame (defaults to 1.0)
-   *   * lineType (optional) - the line type for the axes. Supported line types:
-   *                           'dashed' and 'full'.
-   *   * lineDashLength (optional) - the length of the dashes, relative to the length of the axis.
-   *                                 Maximum value is 1, which means the dash length is
-   *                                 equal to the length of the axis. Parameter only applies when
-   *                                 lineType is set to dashed.
+   * 创建单个坐标轴（带箭头）的内部静态方法。
+   * @private
+   */
+  static #createAxis(options) {
+    const {
+      axisVector,
+      shaftRadius,
+      headRadius,
+      headLength,
+      lineType,
+      lineDashLength,
+    } = options;
+
+    const axisObject = new THREE.Object3D();
+
+    const color = new THREE.Color();
+    color.setRGB(axisVector.x, axisVector.y, axisVector.z);
+    const material = new THREE.MeshBasicMaterial({ color: color.getHex() });
+
+    // 计算从默认的Y轴正方向到目标轴方向的旋转
+    const rotAxis = new THREE.Vector3();
+    rotAxis.crossVectors(new THREE.Vector3(0, 1, 0), axisVector).normalize();
+    const angle = Math.acos(new THREE.Vector3(0, 1, 0).dot(axisVector));
+    const rot = new THREE.Quaternion().setFromAxisAngle(rotAxis, angle);
+
+    // 箭头头部
+    const headGeom = new THREE.CylinderGeometry(0, headRadius, headLength);
+    const head = new THREE.Mesh(headGeom, material);
+    head.position.copy(axisVector).multiplyScalar(1.0 - headLength / 2);
+    head.quaternion.copy(rot);
+    axisObject.add(head);
+
+    // 轴线
+    if (lineType === "full") {
+      const lineGeom = new THREE.CylinderGeometry(
+        shaftRadius,
+        shaftRadius,
+        1.0 - headLength
+      );
+      const line = new THREE.Mesh(lineGeom, material);
+      line.position.copy(axisVector).multiplyScalar((1.0 - headLength) / 2);
+      line.quaternion.copy(rot);
+      axisObject.add(line);
+    } else if (lineType === "dashed") {
+      const dashLen = lineDashLength;
+      const totalLen = 1.0 - headLength;
+      const numDashes = Math.floor(totalLen / (1.5 * dashLen));
+      const dashSpacing = totalLen / numDashes;
+
+      for (let i = 0; i < numDashes; i++) {
+        const dashGeom = new THREE.CylinderGeometry(
+          shaftRadius,
+          shaftRadius,
+          dashLen
+        );
+        const line = new THREE.Mesh(dashGeom, material);
+        const pos = i * dashSpacing + dashSpacing / 2;
+        line.position.copy(axisVector).multiplyScalar(pos);
+        line.quaternion.copy(rot);
+        axisObject.add(line);
+      }
+    }
+
+    return axisObject;
+  }
+
+  /**
+   * @param {object} options - 配置选项。
+   * @param {number} [options.shaftRadius=0.008] - 轴的半径。
+   * @param {number} [options.headRadius=0.023] - 箭头头部的半径。
+   * @param {number} [options.headLength=0.1] - 箭头头部的长度。
+   * @param {number} [options.scale=1.0] - 整个坐标轴的缩放比例。
+   * @param {string} [options.lineType='full'] - 轴的线型，支持 'full' (实线) 和 'dashed' (虚线)。
+   * @param {number} [options.lineDashLength=0.1] - 虚线的单段长度，仅在 lineType 为 'dashed' 时有效。
    */
   constructor(options = {}) {
     super();
-    const shaftRadius = options.shaftRadius || 0.025;
-    const headRadius = options.headRadius || 0.07;
-    const headLength = options.headLength || 0.2;
-    const scale = options.scale || 1.0;
-    const lineType = options.lineType || 'full';
-    const lineDashLength = options.lineDashLength || 0.1;
 
-    // Create the three axis (note: x = red, y = green, z = blue)
-    // X Axis
-    const xAxisgeo = new THREE.CylinderGeometry(shaftRadius, shaftRadius, 1.0, 64);
-    const xAxis = new THREE.Mesh(xAxisgeo, new THREE.MeshBasicMaterial({ color: 0xFF0000 }));
-    xAxis.rotation.z = -Math.PI / 2;
-    xAxis.position.x = 0.5 * scale;
-    this.add(xAxis);
+    const { scale = 1.0, ...axisOptions } = options;
 
-    const xHead = new THREE.ConeGeometry(headRadius, headLength, 64);
-    const xMarker = new THREE.Mesh(xHead, new THREE.MeshBasicMaterial({ color: 0xFF0000 }));
-    xMarker.position.x = scale;
-    xMarker.rotation.z = -Math.PI / 2;
-    this.add(xMarker);
-
-    // Y Axis
-    const yAxisgeo = new THREE.CylinderGeometry(shaftRadius, shaftRadius, 1.0, 64);
-    const yAxis = new THREE.Mesh(yAxisgeo, new THREE.MeshBasicMaterial({ color: 0x00FF00 }));
-    yAxis.position.y = 0.5 * scale;
-    this.add(yAxis);
-
-    const yHead = new THREE.ConeGeometry(headRadius, headLength, 64);
-    const yMarker = new THREE.Mesh(yHead, new THREE.MeshBasicMaterial({ color: 0x00FF00 }));
-    yMarker.position.y = scale;
-    this.add(yMarker);
-
-    // Z Axis
-    const zAxisgeo = new THREE.CylinderGeometry(shaftRadius, shaftRadius, 1.0, 64);
-    const zAxis = new THREE.Mesh(zAxisgeo, new THREE.MeshBasicMaterial({ color: 0x0000FF }));
-    zAxis.rotation.x = Math.PI / 2;
-    zAxis.position.z = 0.5 * scale;
-    this.add(zAxis);
-
-    const zHead = new THREE.ConeGeometry(headRadius, headLength, 64);
-    const zMarker = new THREE.Mesh(zHead, new THREE.MeshBasicMaterial({ color: 0x0000FF }));
-    zMarker.position.z = scale;
-    zMarker.rotation.x = Math.PI / 2;
-    this.add(zMarker);
-
-    // Scale the whole axis
     this.scale.set(scale, scale, scale);
+
+    const axesVectors = [
+      new THREE.Vector3(1, 0, 0), // X 轴
+      new THREE.Vector3(0, 1, 0), // Y 轴
+      new THREE.Vector3(0, 0, 1), // Z 轴
+    ];
+
+    axesVectors.forEach((axisVector) => {
+      const axis = this.constructor.#createAxis({ ...axisOptions, axisVector });
+      this.add(axis);
+    });
+  }
+
+  /**
+   * 销毁并释放所有相关的GPU资源。
+   */
+  dispose() {
+    this.traverse((object) => {
+      if (object.isMesh) {
+        if (object.geometry) {
+          object.geometry.dispose();
+        }
+        if (object.material) {
+          object.material.dispose();
+        }
+      }
+    });
   }
 }

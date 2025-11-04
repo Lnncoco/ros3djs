@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import ROS3D from '../src/index.js';
+import * as ROS3D from '../src/index.js';
 
 // 基础API测试
 describe('ROS3D.js 基础功能测试', () => {
@@ -127,7 +127,9 @@ describe('ROS3D.js 类实例化测试', () => {
         pose: {
           position: { x: 0, y: 0, z: 0 },
           orientation: { x: 0, y: 0, z: 0, w: 1 }
-        }
+        },
+        scale: { x: 1, y: 1, z: 1 },
+        color: { r: 1, g: 0, b: 0, a: 1 }
       }
     })).not.toThrow();
   });

@@ -1,0 +1,124 @@
+/* style.css for root index.html */
+
+:root {
+  --background-color: #1e1e1e;
+  --card-background: #2a2a2a;
+  --text-color: #d4d4d4;
+  --header-color: #ffffff;
+  --primary-color: #0e83cd;
+  --primary-hover-color: #119cff;
+  --border-color: #444444;
+}
+
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+body {
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+  background-color: var(--background-color);
+  color: var(--text-color);
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  min-height: 100vh;
+  line-height: 1.6;
+}
+
+.container {
+  max-width: 800px;
+  width: 90%;
+  text-align: center;
+}
+
+header {
+  margin-bottom: 3rem;
+}
+
+h1 {
+  font-size: 3rem;
+  color: var(--header-color);
+  margin-bottom: 0.5rem;
+}
+
+header p {
+  font-size: 1.2rem;
+  color: var(--text-color);
+}
+
+main {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 2rem;
+}
+
+@media (min-width: 768px) {
+  main {
+    grid-template-columns: 1fr 1fr;
+  }
+}
+
+.card {
+  background-color: var(--card-background);
+  padding: 2rem;
+  border-radius: 8px;
+  border: 1px solid var(--border-color);
+  transition: transform 0.3s ease, box-shadow 0.3s ease;
+  text-align: left;
+}
+
+.card:hover {
+  transform: translateY(-5px);
+  box-shadow: 0 8px 20px rgba(0, 0, 0, 0.3);
+  border-color: var(--primary-color);
+}
+
+.card h2 {
+  margin-bottom: 1rem;
+}
+
+.card h2 a {
+  color: var(--primary-color);
+  text-decoration: none;
+  font-size: 1.5rem;
+}
+
+.card p {
+  margin-bottom: 1.5rem;
+  color: var(--text-color);
+}
+
+.btn {
+  display: inline-block;
+  background-color: var(--primary-color);
+  color: white;
+  padding: 0.6rem 1.2rem;
+  border-radius: 5px;
+  text-decoration: none;
+  font-weight: bold;
+  transition: background-color 0.3s ease;
+}
+
+.btn:hover {
+  background-color: var(--primary-hover-color);
+}
+
+.card.disabled a {
+  color: #888;
+}
+
+.disabled-btn {
+    background-color: #555;
+    cursor: not-allowed;
+}
+
+.disabled-btn:hover {
+    background-color: #555;
+}
+
+footer {
+  margin-top: 4rem;
+  color: #888;
+}

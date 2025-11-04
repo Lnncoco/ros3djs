@@ -1,112 +1,115 @@
 /**
- * @fileOverview
- * @author David Gossow - dgossow@willowgarage.com
+ * @fileOverview 定义了 Arrow 类，一个可配置的箭头三维对象。
  */
 
-import * as THREE from 'three';
+import * as THREE from "three";
+import { createArrow } from "./arrow.creator";
 
 /**
- * A Arrow is a THREE object that can be used to display an arrow model.
+ * Arrow 是一个 THREE.Object3D，可用于显示一个可编程的箭头模型。
+ * 默认沿Y轴正方向创建，然后通过 setDirection旋转到指定方向。
  */
 export class Arrow extends THREE.Object3D {
   /**
-   * @param options - object with following keys:
-   *   * origin (optional) - the origin of the arrow
-   *   * direction (optional) - the direction vector of the arrow
-   *   * length (optional) - the length of the arrow
-   *   * headLength (optional) - the head length of the arrow
-   *   * shaftDiameter (optional) - the shaft diameter of the arrow
-   *   * headDiameter (optional) - the head diameter of the arrow
-   *   * material (optional) - the material to use for this arrow
+   * @param {object} options - 配置选项。
+   * @param {THREE.Vector3} [options.origin=new THREE.Vector3(0, 0, 0)] - 箭头的原点。
+   * @param {THREE.Vector3} [options.direction=new THREE.Vector3(1, 0, 0)] - 箭头的方向向量。
+   * @param {number} [options.length=1] - 箭头的总长度。
+   * @param {number} [options.headLength=0.2*length] - 箭头头部的长度。
+   * @param {number} [options.shaftDiameter=0.05*length] - 箭头轴的直径。
+   * @param {number} [options.headDiameter=0.1*length] - 箭头头部的直径。
+   * @param {THREE.Material} [options.material] - 用于此箭头的材质。如果未提供，则创建一个新的紫色BasicMaterial。
    */
   constructor(options = {}) {
     super();
-    const origin = options.origin || new THREE.Vector3(0, 0, 0);
-    const direction = options.direction || new THREE.Vector3(1, 0, 0);
-    const length = options.length || 1;
-    const headLength = options.headLength || (length * 0.2);
-    const shaftDiameter = options.shaftDiameter || (length * 0.05);
-    const headDiameter = options.headDiameter || (length * 0.1);
-    const material = options.material || new THREE.MeshBasicMaterial({ color: 0xcc00ff });
 
-    // Apply the origin
+    const { 
+      length = 1,
+      origin = new THREE.Vector3(0, 0, 0),
+      direction = new THREE.Vector3(1, 0, 0),
+      headLength = 0.2,
+      shaftDiameter = 0.05,
+      headDiameter = 0.1,
+      material = new THREE.MeshBasicMaterial({ color: 0xcc00ff }),
+    } = options;
+
+    this.length = length;
+    this.headLength = headLength;
+    this.shaftDiameter = shaftDiameter;
+    this.headDiameter = headDiameter;
+    this.material = material;
+
+    const shaftLength = this.length - this.headLength;
+    this.initialShaftLength = shaftLength; // 保存初始箭杆长度
+
+    // 使用创建器生成箭头的视觉部分
+    this.arrowGroup = createArrow({
+      shaftLength,
+      shaftDiameter: this.shaftDiameter,
+      headLength: this.headLength,
+      headDiameter: this.headDiameter,
+      material: this.material,
+    });
+
+    this.add(this.arrowGroup);
+
     this.position.copy(origin);
-
-    // Create the arrow
-    const shaftLength = length - headLength;
-    
-    // Create shaft
-    const shaftGeometry = new THREE.CylinderGeometry(
-      shaftDiameter / 2, 
-      shaftDiameter / 2, 
-      shaftLength, 
-      16
-    );
-    const shaft = new THREE.Mesh(shaftGeometry, material);
-    shaft.rotation.x = Math.PI / 2; // Rotate to align with X axis
-    shaft.position.x = shaftLength / 2; // Center it at origin
-
-    // Create head
-    const headGeometry = new THREE.ConeGeometry(
-      headDiameter / 2, 
-      headLength, 
-      16
-    );
-    const head = new THREE.Mesh(headGeometry, material);
-    head.rotation.x = Math.PI / 2; // Rotate to align with X axis
-    head.position.x = shaftLength + headLength / 2; // Position at the end of shaft
-
-    // Add the shaft and head to this object
-    this.add(shaft);
-    this.add(head);
-
-    // Set the direction
     this.setDirection(direction);
   }
 
   /**
-   * Set the direction of this arrow to that of the given vector.
-   *
-   * @param direction - the direction to set this marker to
+   * 将此箭头的方向设置为给定向量的方向。
+   * @param {THREE.Vector3} direction - 要设置的方向向量。
    */
   setDirection(direction) {
-    // Create a quaternion from the direction vector
-    const d = direction.clone().normalize();
-    const arrowDirection = new THREE.Vector3(1, 0, 0); // Initial direction
-    const quaternion = new THREE.Quaternion();
-    quaternion.setFromUnitVectors(arrowDirection, d);
-    this.quaternion.copy(quaternion);
+    const axis = new THREE.Vector3(0, 1, 0); // 箭头模型默认沿Y轴
+    this.quaternion.setFromUnitVectors(axis, direction.clone().normalize());
   }
 
   /**
-   * Set the length of this arrow to the given value.
-   *
-   * @param length - the new length of the arrow
+   * 设置箭头的新长度。此方法通过缩放轴并移动头部来高效更新，而无需重新创建几何体。
+   * @param {number} length - 箭头的新总长度。
    */
-  setLength(length, headLength, shaftDiameter, headDiameter) {
-    // For simplicity, we'll update the scale
-    // Find shaft and head in children and update their geometries
-    // In this basic implementation, we'll just recreate the arrow
-    const direction = new THREE.Vector3(1, 0, 0);
-    direction.applyQuaternion(this.quaternion);
-    
-    // Remove current children
-    while(this.children.length > 0) {
-      this.remove(this.children[0]);
+  setLength(length) {
+    if (this.initialShaftLength <= 0) return; // 防止除以零或负数
+
+    this.length = length;
+    const newShaftLength = this.length - this.headLength;
+
+    const shaft = this.arrowGroup.getObjectByName("shaft");
+    const head = this.arrowGroup.getObjectByName("head");
+
+    if (shaft) {
+      // 始终基于初始几何体长度进行缩放
+      shaft.scale.y = newShaftLength / this.initialShaftLength;
+      shaft.position.y = newShaftLength / 2;
     }
-    
-    // Create new arrow with updated size
-    const newArrow = new Arrow({
-      origin: new THREE.Vector3(0, 0, 0), // Origin is now the object's position
-      direction: direction,
-      length: length,
-      headLength: headLength,
-      shaftDiameter: shaftDiameter,
-      headDiameter: headDiameter
+    if (head) {
+      head.position.y = newShaftLength + this.headLength / 2;
+    }
+  }
+
+  /**
+   * 设置箭头的颜色。
+   * @param {THREE.Color | number | string} color - 要设置的颜色。
+   */
+  setColor(color) {
+    if (this.material) {
+      this.material.color.set(color);
+    }
+  }
+
+  /**
+   * 释放此对象占用的GPU资源。
+   */
+  dispose() {
+    this.arrowGroup.children.forEach((child) => {
+      if (child.geometry) {
+        child.geometry.dispose();
+      }
     });
-    
-    // Copy position and add the children to this object
-    this.position.copy(newArrow.position);
-    this.add(...newArrow.children);
+    if (this.material) {
+      this.material.dispose();
+    }
   }
 }

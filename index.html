@@ -1,101 +1,32 @@
 <!DOCTYPE html>
 <html lang="zh-CN">
-  <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>ROS3D.js - 开发示例</title>
-    <style>
-      body {
-        font-family: Arial, sans-serif;
-        margin: 0;
-        padding: 20px;
-        background-color: #f5f5f5;
-      }
-      .container {
-        max-width: 1000px;
-        margin: 0 auto;
-        background: white;
-        padding: 30px;
-        border-radius: 8px;
-        box-shadow: 0 2px 10px rgba(0,0,0,0.1);
-      }
-      h1 {
-        color: #333;
-        text-align: center;
-      }
-      .links {
-        display: grid;
-        grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
-        gap: 20px;
-        margin-top: 30px;
-      }
-      .link-card {
-        background: #f8f9fa;
-        padding: 20px;
-        border-radius: 6px;
-        text-align: center;
-        border: 1px solid #e9ecef;
-      }
-      .link-card h3 {
-        margin-top: 0;
-        color: #495057;
-      }
-      .link-card a {
-        display: inline-block;
-        background: #0d6efd;
-        color: white;
-        padding: 10px 20px;
-        text-decoration: none;
-        border-radius: 4px;
-        margin-top: 10px;
-      }
-      .link-card a:hover {
-        background: #0b5ed7;
-      }
-    </style>
-  </head>
-  <body>
-    <div class="container">
-      <h1>ROS3D.js - 开发示例</h1>
-      <p style="text-align: center; color: #6c757d;">
-        当前版本: <span id="version"></span> | 
-        选择下面的示例来测试功能
-      </p>
-      
-      <div class="links">
-        <div class="link-card">
-          <h3>基础场景示例 (构建版)</h3>
-          <p>展示构建后的 ROS3D.js 库的基础3D场景</p>
-          <a href="./examples/basic-scene.html">查看示例</a>
-        </div>
-        
-        <div class="link-card">
-          <h3>API验证示例</h3>
-          <p>验证所有API功能是否正常，包括常量、函数和类</p>
-          <a href="./examples/api-validation.html">查看示例</a>
-        </div>
-        
-        <div class="link-card">
-          <h3>重构验证场景 (开发版)</h3>
-          <p>用于验证重构中的 ROS3D.js 源代码的基础功能</p>
-          <a href="./examples/verification-scene.html">查看示例</a>
-        </div>
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>ROS3D.js - 开发启动台</title>
+  <link rel="stylesheet" href="/style.css">
+</head>
+<body>
+  <div class="container">
+    <header>
+      <h1>ROS3D.js</h1>
+      <p>现代化的机器人3D可视化库</p>
+    </header>
+    <main>
+      <div class="card">
+        <h2><a href="/preview/index.html">🧪 可视化测试平台</a></h2>
+        <p>交互式平台，用于独立测试、预览和调试所有可视化组件。</p>
+        <a href="/preview/index.html" class="btn">立即进入</a>
       </div>
-      
-      <div style="margin-top: 30px; text-align: center; color: #6c757d; font-size: 0.9em;">
-        <p>使用 <code>pnpm dev</code> 启动开发服务器</p>
-        <p>使用 <code>pnpm build</code> 构建生产版本</p>
-        <p>使用 <code>pnpm test</code> 运行单元测试</p>
+      <div class="card disabled">
+        <h2><a href="/docs/index.html">📚 项目文档</a></h2>
+        <p>查看项目架构、API参考和开发指南。</p>
+        <a href="#" class="btn disabled-btn">即将推出</a>
       </div>
-    </div>
-    
-    <script>
-      // 从库中加载版本信息
-      import('./src/index.js').then(ROS3D => {
-        document.getElementById('version').textContent = ROS3D.default?.REVISION || 'N/A';
-      }).catch(() => {
-        document.getElementById('version').textContent = '加载失败';
-      });
-    </script>
-  </body>
+    </main>
+    <footer>
+      <p>开发服务器运行中...</p>
+    </footer>
+  </div>
+</body>
 </html>

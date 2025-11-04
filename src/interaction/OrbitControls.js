@@ -1,406 +1,389 @@
 /**
- * @fileOverview
- * @author David Gossow - dgossow@willowgarage.com
- * @author Xueqiao Xu - xueqiaoxu@gmail.com
- * @author Mr.doob - http://mrdoob.com
- * @author AlteredQualia - http://alteredqualia.com
+ * @fileOverview 行为类似于 THREE.OrbitControls，但使用右手坐标系和 z 作为上向量。
+ *
+ * 注意：鼠标交互行为经过核对调整，请勿随意修改：
+ * - 左键：旋转
+ * - 中键：缩放
+ * - 右键：平移
+ * - 滚轮：向上缩小/向下放大（原先是相反的）
  */
 
-import * as THREE from 'three';
-import { Axes } from '../models/Axes';
+import * as THREE from "three";
+import { Axes } from "@models/Axes";
+import { intersectViewPlane } from "./interaction.utils";
+import {
+  handleRotateMove,
+  handleZoomMove,
+  handlePanMove,
+  handleTouchMoveLogic,
+} from "./orbit.handlers";
 
 /**
  * 行为类似于 THREE.OrbitControls，但使用右手坐标系和 z 作为上向量。
  */
 export class OrbitControls extends THREE.EventDispatcher {
   /**
-   * @constructor
-   * @param options - 包含以下键的对象：
-   *   - scene: 要使用的全局场景
-   *   - camera: 要使用的相机
-   *   - userZoomSpeed (可选): 缩放速度
-   *   - userRotateSpeed (可选): 旋转速度
-   *   - autoRotate (可选): 是否自动旋转
-   *   - autoRotateSpeed (可选): 自动旋转速度
-   *   - displayPanAndZoomFrame: 是否显示平移/缩放帧
-   *                            (默认为 true)
-   *   - lineTypePanAndZoomFrame: 平移/缩放时显示帧的线型。仅当
-   *                            displayPanAndZoomFrame 设置为 true 时有效。
+   * @param {Object} options - 配置选项。
+   * @param {THREE.Scene} options.scene - 要使用的全局场景。
+   * @param {THREE.Camera} options.camera - 要使用的相机。
+   * @param {number} [options.userZoomSpeed=1.0] - 缩放速度。
+   * @param {number} [options.userRotateSpeed=1.0] - 旋转速度。
+   * @param {boolean} [options.autoRotate=false] - 是否自动旋转。
+   * @param {number} [options.autoRotateSpeed=2.0] - 自动旋转速度。
+   * @param {boolean} [options.displayPanAndZoomFrame=true] - 是否显示平移/缩放帧。
+   * @param {string} [options.lineTypePanAndZoomFrame='full'] - 平移/缩放时显示帧的线型。
    */
   constructor(options = {}) {
     super();
-    const that = this;
-    options = options || {};
-    const scene = options.scene;
-    this.camera = options.camera;
-    this.center = new THREE.Vector3();
-    this.userZoom = true;
-    this.userZoomSpeed = options.userZoomSpeed || 1.0;
-    this.userRotate = true;
-    this.userRotateSpeed = options.userRotateSpeed || 1.0;
-    this.autoRotate = options.autoRotate;
-    this.autoRotateSpeed = options.autoRotateSpeed || 2.0;
-    this.displayPanAndZoomFrame = (options.displayPanAndZoomFrame === undefined) ?
-        true :
-        !!options.displayPanAndZoomFrame;
-    this.lineTypePanAndZoomFrame = options.lineTypePanAndZoomFrame || 'full';
+
+    const {
+      scene,
+      camera,
+      userZoomSpeed = 1.0,
+      userRotateSpeed = 1.0,
+      autoRotate = false,
+      autoRotateSpeed = 2.0,
+      displayPanAndZoomFrame = true,
+      lineTypePanAndZoomFrame = "full",
+    } = options;
+
+    this.camera = camera;
+    this.scene = scene; // 保存场景引用，用于添加/移除辅助轴
+
+    this.userZoomSpeed = userZoomSpeed;
+    this.userRotateSpeed = userRotateSpeed;
+    this.autoRotate = autoRotate;
+    this.autoRotateSpeed = autoRotateSpeed;
+    this.displayPanAndZoomFrame = displayPanAndZoomFrame;
+    this.lineTypePanAndZoomFrame = lineTypePanAndZoomFrame;
+
+    this.#initializeState();
+    this.#setupAxesDisplay();
+    this.#attachEventListeners();
+
     // 在 ROS 中，z 指向上方
     this.camera.up = new THREE.Vector3(0, 0, 1);
+  }
 
-    // 内部参数
-    const pixelsPerRound = 1800;
-    const touchMoveThreshold = 10;
-    const rotateStart = new THREE.Vector2();
-    const rotateEnd = new THREE.Vector2();
-    const rotateDelta = new THREE.Vector2();
-    const zoomStart = new THREE.Vector2();
-    const zoomEnd = new THREE.Vector2();
-    const zoomDelta = new THREE.Vector2();
-    const moveStartCenter = new THREE.Vector3();
-    const moveStartNormal = new THREE.Vector3();
-    const moveStartPosition = new THREE.Vector3();
-    const moveStartIntersection = new THREE.Vector3();
-    const touchStartPosition = new Array(2);
-    const touchMoveVector = new Array(2);
+  #initializeState() {
+    this.center = new THREE.Vector3();
+    this.userZoom = true;
+    this.userRotate = true;
+
+    this.rotateStart = new THREE.Vector2();
+    this.rotateEnd = new THREE.Vector2();
+    this.rotateDelta = new THREE.Vector2();
+
+    this.zoomStart = new THREE.Vector2();
+    this.zoomEnd = new THREE.Vector2();
+    this.zoomDelta = new THREE.Vector2();
+
+    this.moveStartCenter = new THREE.Vector3();
+    this.moveStartNormal = new THREE.Vector3();
+    this.moveStartPosition = new THREE.Vector3();
+    this.moveStartIntersection = new THREE.Vector3();
+
+    this.touchStartPosition = new Array(2);
+    this.touchMoveVector = new Array(2);
+
     this.phiDelta = 0;
     this.thetaDelta = 0;
     this.scale = 1;
     this.lastPosition = new THREE.Vector3();
-    // 内部状态
-    const STATE = {
-      NONE : -1,
-      ROTATE : 0,
-      ZOOM : 1,
-      MOVE : 2
-    };
-    let state = STATE.NONE;
 
+    this.STATE = {
+      NONE: -1,
+      ROTATE: 0,
+      ZOOM: 1,
+      MOVE: 2,
+    };
+    this.state = this.STATE.NONE;
+  }
+
+  #setupAxesDisplay() {
     this.axes = new Axes({
-      shaftRadius : 0.025,
-      headRadius : 0.07,
-      headLength : 0.2,
-      lineType: this.lineTypePanAndZoomFrame
+      shaftRadius: 0.025,
+      headRadius: 0.07,
+      headLength: 0.2,
+      lineType: this.lineTypePanAndZoomFrame,
     });
     if (this.displayPanAndZoomFrame) {
-      // 初始时不可见
-      scene.add(this.axes);
-      this.axes.traverse(function(obj) {
+      this.scene.add(this.axes);
+      this.axes.traverse((obj) => {
         obj.visible = false;
       });
     }
+  }
 
-    /**
-     * 处理 mousedown 3D 事件。
-     *
-     * @param event3D - 要处理的 3D 事件
-     */
-    function onMouseDown(event3D) {
-      const event = event3D.domEvent;
+  #attachEventListeners() {
+    this.addEventListener("mousedown", this.#onMouseDown.bind(this));
+    this.addEventListener("mouseup", this.#onMouseUp.bind(this));
+    this.addEventListener("mousemove", this.#onMouseMove.bind(this));
+    this.addEventListener("touchstart", this.#onTouchDown.bind(this));
+    this.addEventListener("touchmove", this.#onTouchMove.bind(this));
+    this.addEventListener("touchend", this.#onTouchEnd.bind(this));
+    this.addEventListener("mousewheel", this.#onMouseWheel.bind(this));
+    this.addEventListener("DOMMouseScroll", this.#onMouseWheel.bind(this));
+    this.addEventListener("wheel", this.#onWheel.bind(this));
+    this.addEventListener("contextmenu", this.#onContextMenu.bind(this));
+  }
+
+  /**
+   * 处理 mousedown 3D 事件。
+   * @param {Object} event3D - 要处理的 3D 事件
+   */
+  #onMouseDown(event3D) {
+    const event = event3D.domEvent;
+    event.preventDefault();
+
+    switch (event.button) {
+      case 0:
+        this.state = this.STATE.ROTATE;
+        this.rotateStart.set(event.clientX, event.clientY);
+        break;
+      case 1:
+        this.state = this.STATE.ZOOM;
+        this.zoomStart.set(event.clientX, event.clientY);
+        break;
+      case 2:
+        this.state = this.STATE.MOVE;
+        this.moveStartNormal.copy(new THREE.Vector3(0, 0, 1));
+        const rMat = new THREE.Matrix4().extractRotation(this.camera.matrix);
+        this.moveStartNormal.applyMatrix4(rMat);
+
+        this.moveStartCenter.copy(this.center);
+        this.moveStartPosition.copy(this.camera.position);
+        this.moveStartIntersection.copy(
+          intersectViewPlane(
+            event3D.mouseRay,
+            this.moveStartCenter,
+            this.moveStartNormal
+          )
+        );
+        break;
+    }
+
+    this.showAxes();
+  }
+
+  /**
+   * 处理 mousemove 3D 事件。
+   * @param {Object} event3D - 要处理的 3D 事件
+   */
+  #onMouseMove(event3D) {
+    const event = event3D.domEvent;
+    if (this.state === this.STATE.ROTATE) {
+      this.rotateEnd.set(event.clientX, event.clientY);
+      this.rotateDelta.subVectors(this.rotateEnd, this.rotateStart);
+      handleRotateMove(this, this.rotateDelta); // 调用处理函数
+      this.rotateStart.copy(this.rotateEnd);
+      this.showAxes();
+    } else if (this.state === this.STATE.ZOOM) {
+      this.zoomEnd.set(event.clientX, event.clientY);
+      this.zoomDelta.subVectors(this.zoomEnd, this.zoomStart);
+      handleZoomMove(this, this.zoomDelta); // 调用处理函数
+      this.zoomStart.copy(this.zoomEnd);
+      this.showAxes();
+    } else if (this.state === this.STATE.MOVE) {
+      handlePanMove(
+        this,
+        event3D,
+        this.moveStartCenter,
+        this.moveStartPosition,
+        this.moveStartIntersection,
+        this.moveStartNormal
+      ); // 调用处理函数
+      this.showAxes();
+    }
+  }
+
+  /**
+   * 处理 mouseup 3D 事件。
+   * @param {Object} event3D - 要处理的 3D 事件
+   */
+  #onMouseUp(event3D) {
+    if (!this.userRotate) {
+      return;
+    }
+    this.state = this.STATE.NONE;
+  }
+
+  /**
+   * 处理 wheel 3D 事件 (现代浏览器)。
+   * @param {Object} event3D - 要处理的 3D 事件
+   */
+  #onWheel(event3D) {
+    if (!this.userZoom) {
+      return;
+    }
+
+    const event = event3D.domEvent;
+    event.preventDefault(); // 阻止页面滚动
+
+    // 根据用户反馈，调整滚轮方向以符合Windows标准
+    if (event.deltaY < 0) {
+      this.zoomOut(); // 向上滚动缩小
+    } else {
+      this.zoomIn(); // 向下滚动放大
+    }
+
+    this.showAxes();
+  }
+
+  /**
+   * 处理 mousewheel 3D 事件 (旧版浏览器)。
+   * @param {Object} event3D - 要处理的 3D 事件
+   */
+  #onMouseWheel(event3D) {
+    if (!this.userZoom) {
+      return;
+    }
+
+    const event = event3D.domEvent;
+    event.preventDefault(); // 阻止页面滚动
+
+    let delta;
+    if (typeof event.wheelDelta !== "undefined") {
+      delta = event.wheelDelta;
+    } else {
+      delta = -event.detail;
+    }
+    if (delta > 0) {
+      this.zoomOut(); // 正向滚动缩小
+    } else {
+      this.zoomIn(); // 负向滚动放大
+    }
+
+    this.showAxes();
+  }
+
+  /**
+   * 处理 contextmenu 事件，阻止默认行为。
+   * @param {Object} event3D - 要处理的 3D 事件
+   */
+  #onContextMenu(event3D) {
+    event3D.domEvent.preventDefault();
+  }
+
+  /**
+   * 处理 touchdown 3D 事件。
+   * @param {Object} event3D - 要处理的 3D 事件
+   */
+  #onTouchDown(event3D) {
+    const event = event3D.domEvent;
+    switch (event.touches.length) {
+      case 1:
+        this.state = this.STATE.ROTATE;
+        this.rotateStart.set(
+          event.touches[0].pageX - window.scrollX,
+          event.touches[0].pageY - window.scrollY
+        );
+        break;
+      case 2:
+        this.state = this.STATE.NONE;
+        this.moveStartNormal.copy(new THREE.Vector3(0, 0, 1));
+        const rMat = new THREE.Matrix4().extractRotation(this.camera.matrix);
+        this.moveStartNormal.applyMatrix4(rMat);
+        this.moveStartCenter.copy(this.center);
+        this.moveStartPosition.copy(this.camera.position);
+        this.moveStartIntersection.copy(
+          intersectViewPlane(
+            event3D.mouseRay,
+            this.moveStartCenter,
+            this.moveStartNormal
+          )
+        );
+        this.touchStartPosition[0] = new THREE.Vector2(
+          event.touches[0].pageX,
+          event.touches[0].pageY
+        );
+        this.touchStartPosition[1] = new THREE.Vector2(
+          event.touches[1].pageX,
+          event.touches[1].pageY
+        );
+        this.touchMoveVector[0] = new THREE.Vector2(0, 0);
+        this.touchMoveVector[1] = new THREE.Vector2(0, 0);
+        break;
+    }
+
+    this.showAxes();
+
+    event.preventDefault();
+  }
+
+  /**
+   * 处理 touchmove 3D 事件。
+   * @param {Object} event3D - 要处理的 3D 事件
+   */
+  #onTouchMove(event3D) {
+    const event = event3D.domEvent;
+    // 触摸旋转逻辑与鼠标旋转逻辑分离
+    if (this.state === this.STATE.ROTATE) {
+      this.rotateEnd.set(
+        event.touches[0].pageX - window.scrollX,
+        event.touches[0].pageY - window.scrollY
+      );
+      this.rotateDelta.subVectors(this.rotateEnd, this.rotateStart);
+
+      handleRotateMove(this, this.rotateDelta); // 调用处理函数
+
+      this.rotateStart.copy(this.rotateEnd);
+      this.showAxes();
+    } else {
+      handleTouchMoveLogic(
+        this,
+        event3D,
+        this.touchMoveVector,
+        this.touchStartPosition,
+        this.moveStartCenter,
+        this.moveStartPosition,
+        this.moveStartIntersection,
+        this.moveStartNormal
+      ); // 调用处理函数
+      this.showAxes();
       event.preventDefault();
-
-      switch (event.button) {
-        case 0:
-          state = STATE.ROTATE;
-          rotateStart.set(event.clientX, event.clientY);
-          break;
-        case 1:
-          state = STATE.MOVE;
-
-          moveStartNormal.copy(new THREE.Vector3(0, 0, 1));
-          const rMat = new THREE.Matrix4().extractRotation(that.camera.matrix);
-          moveStartNormal.applyMatrix4(rMat);
-
-          moveStartCenter.copy(that.center);
-          moveStartPosition.copy(that.camera.position);
-          moveStartIntersection.copy(intersectViewPlane(event3D.mouseRay,
-                                                     moveStartCenter,
-                                                     moveStartNormal));
-          break;
-        case 2:
-          state = STATE.ZOOM;
-          zoomStart.set(event.clientX, event.clientY);
-          break;
-      }
-
-      that.showAxes();
     }
+  }
 
-    /**
-     * 处理 mousemove 3D 事件。
-     *
-     * @param event3D - 要处理的 3D 事件
-     */
-    function onMouseMove(event3D) {
-      const event = event3D.domEvent;
-      if (state === STATE.ROTATE) {
-
-        rotateEnd.set(event.clientX, event.clientY);
-        rotateDelta.subVectors(rotateEnd, rotateStart);
-
-        that.rotateLeft(2 * Math.PI * rotateDelta.x / pixelsPerRound * that.userRotateSpeed);
-        that.rotateUp(2 * Math.PI * rotateDelta.y / pixelsPerRound * that.userRotateSpeed);
-
-        rotateStart.copy(rotateEnd);
-        that.showAxes();
-      } else if (state === STATE.ZOOM) {
-        zoomEnd.set(event.clientX, event.clientY);
-        zoomDelta.subVectors(zoomEnd, zoomStart);
-
-        if (zoomDelta.y > 0) {
-          that.zoomIn();
-        } else {
-          that.zoomOut();
-        }
-
-        zoomStart.copy(zoomEnd);
-        that.showAxes();
-
-      } else if (state === STATE.MOVE) {
-        const intersection = intersectViewPlane(event3D.mouseRay, that.center, moveStartNormal);
-
-        if (!intersection) {
-          return;
-        }
-
-        const delta = new THREE.Vector3().subVectors(moveStartIntersection.clone(), intersection
-            .clone());
-
-        that.center.addVectors(moveStartCenter.clone(), delta.clone());
-        that.camera.position.addVectors(moveStartPosition.clone(), delta.clone());
-        that.update();
-        that.camera.updateMatrixWorld();
-        that.showAxes();
-      }
+  #onTouchEnd(event3D) {
+    const event = event3D.domEvent;
+    if (event.touches.length === 1 && this.state !== this.STATE.ROTATE) {
+      this.state = this.STATE.ROTATE;
+      this.rotateStart.set(
+        event.touches[0].pageX - window.scrollX,
+        event.touches[0].pageY - window.scrollY
+      );
+    } else {
+      this.state = this.STATE.NONE;
     }
-
-    /**
-     * 用于跟踪相机移动期间的移动。
-     *
-     * @param mouseRay - 要相交的鼠标射线
-     * @param planeOrigin - 平面原点
-     * @param planeNormal - 平面法线
-     * @returns 相交点
-     */
-    function intersectViewPlane(mouseRay, planeOrigin, planeNormal) {
-
-      const vector = new THREE.Vector3();
-      const intersection = new THREE.Vector3();
-
-      vector.subVectors(planeOrigin, mouseRay.origin);
-      const dot = mouseRay.direction.dot(planeNormal);
-
-      // 如果射线和平面平行则退出
-      if (Math.abs(dot) < mouseRay.precision) {
-        return null;
-      }
-
-      // 计算到平面的距离
-      const scalar = planeNormal.dot(vector) / dot;
-
-      intersection.copy(mouseRay.direction.clone().multiplyScalar(scalar));
-      return intersection;
-    }
-
-    /**
-     * 处理 mouseup 3D 事件。
-     *
-     * @param event3D - 要处理的 3D 事件
-     */
-    function onMouseUp(event3D) {
-      if (!that.userRotate) {
-        return;
-      }
-
-      state = STATE.NONE;
-    }
-
-    /**
-     * 处理 mousewheel 3D 事件。
-     *
-     * @param event3D - 要处理的 3D 事件
-     */
-    function onMouseWheel(event3D) {
-      if (!that.userZoom) {
-        return;
-      }
-
-      const event = event3D.domEvent;
-      // wheelDelta --> Chrome, detail --> Firefox
-      let delta;
-      if (typeof (event.wheelDelta) !== 'undefined') {
-        delta = event.wheelDelta;
-      } else {
-        delta = -event.detail;
-      }
-      if (delta > 0) {
-        that.zoomIn();
-      } else {
-        that.zoomOut();
-      }
-
-      that.showAxes();
-    }
-
-    /**
-     * 处理 touchdown 3D 事件。
-     *
-     * @param event3D - 要处理的 3D 事件
-     */
-    function onTouchDown(event3D) {
-      const event = event3D.domEvent;
-      switch (event.touches.length) {
-        case 1:
-          state = STATE.ROTATE;
-          rotateStart.set(event.touches[0].pageX - window.scrollX,
-                          event.touches[0].pageY - window.scrollY);
-          break;
-        case 2:
-          state = STATE.NONE;
-          /* ready for move */
-          moveStartNormal.copy(new THREE.Vector3(0, 0, 1));
-          const rMat = new THREE.Matrix4().extractRotation(that.camera.matrix);
-          moveStartNormal.applyMatrix4(rMat);
-          moveStartCenter.copy(that.center);
-          moveStartPosition.copy(that.camera.position);
-          moveStartIntersection.copy(intersectViewPlane(event3D.mouseRay,
-                                                     moveStartCenter,
-                                                     moveStartNormal));
-          touchStartPosition[0] = new THREE.Vector2(event.touches[0].pageX,
-                                                    event.touches[0].pageY);
-          touchStartPosition[1] = new THREE.Vector2(event.touches[1].pageX,
-                                                    event.touches[1].pageY);
-          touchMoveVector[0] = new THREE.Vector2(0, 0);
-          touchMoveVector[1] = new THREE.Vector2(0, 0);
-          break;
-      }
-
-      that.showAxes();
-
-      event.preventDefault();
-    }
-
-    /**
-     * 处理 touchmove 3D 事件。
-     *
-     * @param event3D - 要处理的 3D 事件
-     */
-    function onTouchMove(event3D) {
-      const event = event3D.domEvent;
-      if (state === STATE.ROTATE) {
-
-        rotateEnd.set(event.touches[0].pageX - window.scrollX, event.touches[0].pageY - window.scrollY);
-        rotateDelta.subVectors(rotateEnd, rotateStart);
-
-        that.rotateLeft(2 * Math.PI * rotateDelta.x / pixelsPerRound * that.userRotateSpeed);
-        that.rotateUp(2 * Math.PI * rotateDelta.y / pixelsPerRound * that.userRotateSpeed);
-
-        rotateStart.copy(rotateEnd);
-        that.showAxes();
-      } else {
-        touchMoveVector[0].set(touchStartPosition[0].x - event.touches[0].pageX,
-                               touchStartPosition[0].y - event.touches[0].pageY);
-        touchMoveVector[1].set(touchStartPosition[1].x - event.touches[1].pageX,
-                               touchStartPosition[1].y - event.touches[1].pageY);
-        if (touchMoveVector[0].lengthSq() > touchMoveThreshold &&
-            touchMoveVector[1].lengthSq() > touchMoveThreshold) {
-          touchStartPosition[0].set(event.touches[0].pageX,
-                                    event.touches[0].pageY);
-          touchStartPosition[1].set(event.touches[1].pageX,
-                                    event.touches[1].pageY);
-          if (touchMoveVector[0].dot(touchMoveVector[1]) > 0 &&
-              state !== STATE.ZOOM) {
-            state = STATE.MOVE;
-          } else if (touchMoveVector[0].dot(touchMoveVector[1]) < 0 &&
-                     state !== STATE.MOVE) {
-            state = STATE.ZOOM;
-          }
-          if (state === STATE.ZOOM) {
-            const tmpVector = new THREE.Vector2();
-            tmpVector.subVectors(touchStartPosition[0],
-                                 touchStartPosition[1]);
-            if (touchMoveVector[0].dot(tmpVector) < 0 &&
-                touchMoveVector[1].dot(tmpVector) > 0) {
-              that.zoomOut();
-            } else if (touchMoveVector[0].dot(tmpVector) > 0 &&
-                       touchMoveVector[1].dot(tmpVector) < 0) {
-              that.zoomIn();
-            }
-          }
-        }
-        if (state === STATE.MOVE) {
-          const intersection = intersectViewPlane(event3D.mouseRay,
-                                                that.center,
-                                                moveStartNormal);
-          if (!intersection) {
-            return;
-          }
-          const delta = new THREE.Vector3().subVectors(moveStartIntersection.clone(),
-                                                     intersection.clone());
-          that.center.addVectors(moveStartCenter.clone(), delta.clone());
-          that.camera.position.addVectors(moveStartPosition.clone(), delta.clone());
-          that.update();
-          that.camera.updateMatrixWorld();
-        }
-
-        that.showAxes();
-
-        event.preventDefault();
-      }
-    }
-
-    function onTouchEnd(event3D) {
-      const event = event3D.domEvent;
-      if (event.touches.length === 1 &&
-          state !== STATE.ROTATE) {
-        state = STATE.ROTATE;
-        rotateStart.set(event.touches[0].pageX - window.scrollX,
-                        event.touches[0].pageY - window.scrollY);
-      }
-      else {
-          state = STATE.NONE;
-      }
-    }
-
-    // 添加事件监听器
-    this.addEventListener('mousedown', onMouseDown);
-    this.addEventListener('mouseup', onMouseUp);
-    this.addEventListener('mousemove', onMouseMove);
-    this.addEventListener('touchstart', onTouchDown);
-    this.addEventListener('touchmove', onTouchMove);
-    this.addEventListener('touchend', onTouchEnd);
-    // Chrome/Firefox 在这里有不同的事件
-    this.addEventListener('mousewheel', onMouseWheel);
-    this.addEventListener('DOMMouseScroll', onMouseWheel);
   }
 
   /**
    * 显示主轴1秒。
    */
   showAxes() {
-    const that = this;
-
-    this.axes.traverse(function(obj) {
+    this.axes.traverse((obj) => {
       obj.visible = true;
     });
     if (this.hideTimeout) {
       clearTimeout(this.hideTimeout);
     }
-    this.hideTimeout = setTimeout(function() {
-      that.axes.traverse(function(obj) {
+    this.hideTimeout = setTimeout(() => {
+      this.axes.traverse((obj) => {
         obj.visible = false;
       });
-      that.hideTimeout = false;
+      this.hideTimeout = false;
     }, 1000);
   }
 
   /**
    * 按给定角度向左旋转相机。
    *
-   * @param angle (可选) - 要旋转的角度
+   * @param {number} [angle] - 要旋转的角度
    */
   rotateLeft(angle) {
     if (angle === undefined) {
-      angle = 2 * Math.PI / 60 / 60 * this.autoRotateSpeed;
+      angle = ((2 * Math.PI) / 60 / 60) * this.autoRotateSpeed;
     }
     this.thetaDelta -= angle;
   }
@@ -408,11 +391,11 @@ export class OrbitControls extends THREE.EventDispatcher {
   /**
    * 按给定角度向右旋转相机。
    *
-   * @param angle (可选) - 要旋转的角度
+   * @param {number} [angle] - 要旋转的角度
    */
   rotateRight(angle) {
     if (angle === undefined) {
-      angle = 2 * Math.PI / 60 / 60 * this.autoRotateSpeed;
+      angle = ((2 * Math.PI) / 60 / 60) * this.autoRotateSpeed;
     }
     this.thetaDelta += angle;
   }
@@ -420,11 +403,11 @@ export class OrbitControls extends THREE.EventDispatcher {
   /**
    * 按给定角度向上旋转相机。
    *
-   * @param angle (可选) - 要旋转的角度
+   * @param {number} [angle] - 要旋转的角度
    */
   rotateUp(angle) {
     if (angle === undefined) {
-      angle = 2 * Math.PI / 60 / 60 * this.autoRotateSpeed;
+      angle = ((2 * Math.PI) / 60 / 60) * this.autoRotateSpeed;
     }
     this.phiDelta -= angle;
   }
@@ -432,11 +415,11 @@ export class OrbitControls extends THREE.EventDispatcher {
   /**
    * 按给定角度向下旋转相机。
    *
-   * @param angle (可选) - 要旋转的角度
+   * @param {number} [angle] - 要旋转的角度
    */
   rotateDown(angle) {
     if (angle === undefined) {
-      angle = 2 * Math.PI / 60 / 60 * this.autoRotateSpeed;
+      angle = ((2 * Math.PI) / 60 / 60) * this.autoRotateSpeed;
     }
     this.phiDelta += angle;
   }
@@ -444,7 +427,7 @@ export class OrbitControls extends THREE.EventDispatcher {
   /**
    * 按给定比例放大。
    *
-   * @param zoomScale (可选) - 要放大的比例
+   * @param {number} [zoomScale] - 要放大的比例
    */
   zoomIn(zoomScale) {
     if (zoomScale === undefined) {
@@ -456,7 +439,7 @@ export class OrbitControls extends THREE.EventDispatcher {
   /**
    * 按给定比例缩小。
    *
-   * @param zoomScale (可选) - 要缩小的比例
+   * @param {number} [zoomScale] - 要缩小的比例
    */
   zoomOut(zoomScale) {
     if (zoomScale === undefined) {
@@ -469,32 +452,38 @@ export class OrbitControls extends THREE.EventDispatcher {
    * 将相机更新到当前设置。
    */
   update() {
-    // x->y, y->z, z->x
     const position = this.camera.position;
     const offset = position.clone().sub(this.center);
 
-    // 绕 y 轴的 z 轴角度
+    // 计算球坐标 - 在ROS坐标系中，Z轴向上
+    // theta: 绕Z轴的方位角 (在XY平面上的角度)
+    // phi: 从Z轴正方向测量的极角 (与Z轴的夹角)
     let theta = Math.atan2(offset.y, offset.x);
-
-    // 从 y 轴的角度
-    let phi = Math.atan2(Math.sqrt(offset.y * offset.y + offset.x * offset.x), offset.z);
+    let phi = Math.atan2(
+      Math.sqrt(offset.x * offset.x + offset.y * offset.y),
+      offset.z
+    );
 
     if (this.autoRotate) {
-      this.rotateLeft(2 * Math.PI / 60 / 60 * this.autoRotateSpeed);
+      this.rotateLeft(((2 * Math.PI) / 60 / 60) * this.autoRotateSpeed);
     }
 
     theta += this.thetaDelta;
     phi += this.phiDelta;
 
-    // 限制 phi 在 EPS 和 PI-EPS 之间
+    // 限制 phi 在 EPS 和 PI-EPS 之间，确保不会翻转到下方
     const eps = 0.000001;
     const clampedPhi = Math.max(eps, Math.min(Math.PI - eps, phi));
 
     let radius = offset.length();
+    // 使用球坐标转换公式计算新位置
+    // x = r * sin(phi) * cos(theta)
+    // y = r * sin(phi) * sin(theta)
+    // z = r * cos(phi)
     offset.set(
-      radius * Math.sin(phi) * Math.cos(theta),
-      radius * Math.sin(phi) * Math.sin(theta),
-      radius * Math.cos(phi)
+      radius * Math.sin(clampedPhi) * Math.cos(theta),
+      radius * Math.sin(clampedPhi) * Math.sin(theta),
+      radius * Math.cos(clampedPhi)
     );
     offset.multiplyScalar(this.scale);
 
@@ -513,9 +502,24 @@ export class OrbitControls extends THREE.EventDispatcher {
 
     if (this.lastPosition.distanceTo(this.camera.position) > 0) {
       this.dispatchEvent({
-        type : 'change'
+        type: "change",
       });
       this.lastPosition.copy(this.camera.position);
     }
+  }
+
+  /**
+   * 销毁并清理所有资源。
+   */
+  dispose() {
+    if (this.hideTimeout) {
+      clearTimeout(this.hideTimeout);
+    }
+    if (this.axes) {
+      this.scene.remove(this.axes);
+      this.axes.dispose();
+    }
+    // 注意：此类中的事件监听器是内部的，由MouseHandler分发。
+    // 当MouseHandler被正确销毁时，这些监听器将不再被调用。
   }
 }
