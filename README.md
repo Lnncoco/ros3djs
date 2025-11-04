@@ -2,8 +2,11 @@
 
 [![CI](https://github.com/RobotWebTools/ros3djs/actions/workflows/main.yml/badge.svg)](https://github.com/RobotWebTools/ros3djs/actions/workflows/main.yml)
 
+⭐ 当前版本区别于官方版本，将 Three.js 升级至 0.118.3 版本，并对部分渲染性能进行了优化。
 
-#### 3D Visualization Library for use with the ROS JavaScript Libraries
+⭐ The current version differs from the official version by upgrading Three.js to version 0.118.3 and optimizing rendering performance.
+
+### 3D Visualization Library for use with the ROS JavaScript Libraries
 
 For full documentation, see [the ROS wiki](http://ros.org/wiki/ros3djs) or check out some [working demos](https://robotwebtools.github.io/demos.html).
 
